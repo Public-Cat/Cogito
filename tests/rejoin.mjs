@@ -56,11 +56,13 @@ async function main() {
     t("Message sent after rejoin: [" + m.playerName + "] " + m.text);
   }
 
-  // Cleanup: reset server session for next test
+  // Cleanup: wait for server to process disconnects
   sA2.emit("game:returnToLobby");
   await new Promise(r => setTimeout(r, 100));
-  sA2.disconnect();
-  sB.disconnect();
+  await Promise.all([
+    new Promise(r => { sA2.once("disconnect", r); sA2.disconnect(); }),
+    new Promise(r => { sB.once("disconnect", r); sB.disconnect(); }),
+  ]);
 
   console.log("\n=== REJOIN TEST PASSED ===");
   process.exit(0);
