@@ -261,8 +261,9 @@ socket.on('host:assigned', () => {
   if (waitingMsg) waitingMsg.textContent = 'you are now the host';
 });
 
-socket.on('game:state', () => {
+socket.on('game:state', (state) => {
   clearScrambles();
+  sessionStorage.setItem('cogito_myId', state.myId || '');
   window.location.href = 'game.html';
 });
 
