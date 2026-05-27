@@ -2,11 +2,20 @@ services:
   app:
     build: .
     ports:
-      - "3000:3000"
+      - "192.168.1.32:3000:3000"
     environment:
       - NODE_ENV=production
       - OLLAMA_BASE_URL=http://192.168.1.30:11434
       - PORT=3000
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - cogito-net
     restart: unless-stopped
+
+networks:
+  cogito-net:
+    name: cogito-net
+    driver: bridge
