@@ -82,16 +82,13 @@ async function main() {
   const nextPlayer = state2.players.find(p => p.id === state2.currentTurn);
   t("Turn advanced to " + (nextPlayer ? nextPlayer.name : "?") + " (round " + state2.round + ")");
 
-  // Cleanup: wait for server to process disconnects
+  // Cleanup: reset server session, then cleanly close sockets
   socketA.emit("game:returnToLobby");
-  await new Promise(r => setTimeout(r, 100));
-  await Promise.all([
-    new Promise(r => { socketA.once("disconnect", r); socketA.disconnect(); }),
-    new Promise(r => { socketB.once("disconnect", r); socketB.disconnect(); }),
-  ]);
+  await new Promise(r => setTimeout(r, 200));
+  socketA.disconnect();
+  socketB.disconnect();
 
   console.log("\n=== ALL E2E TESTS PASSED ===");
-  process.exit(0);
 }
 
 main().catch(err => {

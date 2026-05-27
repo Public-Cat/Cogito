@@ -120,16 +120,13 @@ async function main() {
 
   if (endData.winner !== "humans") throw new Error("FAIL: Humans should win");
 
-  // Cleanup — wait for server to process disconnects
+  // Cleanup: reset server session, then cleanly close sockets
   sA.emit("game:returnToLobby");
-  await new Promise(r => setTimeout(r, 100));
-  await Promise.all([
-    new Promise(r => { sA.once("disconnect", r); sA.disconnect(); }),
-    new Promise(r => { sB.once("disconnect", r); sB.disconnect(); }),
-  ]);
+  await new Promise(r => setTimeout(r, 200));
+  sA.disconnect();
+  sB.disconnect();
 
   console.log("\n=== FULL GAME TEST PASSED ===");
-  process.exit(0);
 }
 
 main().catch(err => {
