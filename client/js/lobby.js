@@ -92,7 +92,7 @@ function setupHostPanel(state) {
   // Replace start button to strip stale listeners (accumulated from repeated lobby:state calls)
   const oldBtn = document.getElementById('startBtn');
   if (oldBtn) {
-    const newBtn = oldBtn.cloneNode(false);
+    const newBtn = oldBtn.cloneNode(true);
     oldBtn.parentNode.replaceChild(newBtn, oldBtn);
     newBtn.id = 'startBtn';
     newBtn.disabled = true;
