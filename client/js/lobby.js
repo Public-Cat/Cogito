@@ -1,0 +1,205 @@
+const socket = io();
+
+let myId = null;
+
+const app = document.getElementById('app');
+
+function render() {
+  app.innerHTML = `
+    <div class="panel" style="max-width:600px;margin:40px auto;">
+      <h1 style="text-align:center;font-size:2em;margin-bottom:16px;">> COGITO</h1>
+      <p style="text-align:center;margin-bottom:24px;color:var(--color-text-dim);">cogito ergo sum. but do you?</p>
+      <div id="joinPanel">
+        <label for="nameInput">enter designation:</label><br>
+        <input type="text" id="nameInput" maxlength="20" placeholder="your name" style="width:100%;margin:8px 0;">
+        <button id="joinBtn" style="width:100%;">> JOIN</button>
+      </div>
+      <div id="lobbyContent" style="display:none;">
+        <div id="waitingMsg" style="color:var(--color-text-dim);">waiting for host to start...</div>
+        <div id="hostPanel" style="display:none;">
+          <h2>host controls</h2>
+          <label for="topicSelect">topic:</label>
+          <select id="topicSelect" style="width:100%;margin:4px 0 12px;"></select>
+          <div id="aiConfig"></div>
+          <button id="startBtn" disabled style="width:100%;margin-top:12px;">> START GAME</button>
+        </div>
+        <h3 style="margin-top:16px;">players in lobby:</h3>
+        <div id="playerList"></div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('joinBtn').addEventListener('click', joinLobby);
+  document.getElementById('nameInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') joinLobby();
+  });
+}
+
+async function joinLobby() {
+  const name = document.getElementById('nameInput').value.trim();
+  if (!name) return;
+  socket.emit('lobby:setName', { name });
+}
+
+function showLobby(state) {
+  document.getElementById('joinPanel').style.display = 'none';
+  const lobbyContent = document.getElementById('lobbyContent');
+  lobbyContent.style.display = 'block';
+
+  const waitingMsg = document.getElementById('waitingMsg');
+  const hostPanel = document.getElementById('hostPanel');
+
+  if (state.isHost) {
+    waitingMsg.style.display = 'none';
+    hostPanel.style.display = 'block';
+    setupHostPanel(state);
+  } else {
+    waitingMsg.style.display = 'block';
+    hostPanel.style.display = 'none';
+  }
+
+  renderPlayerList(state.players);
+}
+
+function setupHostPanel(state) {
+  const topicSelect = document.getElementById('topicSelect');
+  topicSelect.innerHTML = '<option value="">-- random --</option>';
+  const topics = [
+    'Would you rather live in the city or the countryside?',
+    'What makes a piece of music unforgettable?',
+    'Is it ever okay to lie to someone you love?',
+    'What makes a great leader?',
+    'If you could master one skill instantly, what would it be?',
+    'What is the most important quality in a friend?',
+    'Should animals have the same rights as humans?',
+    'What does it mean to live a good life?',
+    'Is technology making us more or less connected?',
+    'What is the best book you have ever read and why?',
+    'If you could travel anywhere, where would you go?',
+    'What is the most important invention in human history?',
+    'Is it better to be talented or hardworking?',
+    'What is your earliest memory?',
+    'If you could have dinner with any historical figure, who would it be?',
+  ];
+  topics.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = t;
+    topicSelect.appendChild(opt);
+  });
+
+  const aiConfigDiv = document.getElementById('aiConfig');
+  aiConfigDiv.innerHTML = '<label>AI players:</label>';
+  const addAiBtn = document.createElement('button');
+  addAiBtn.textContent = '+ ADD AI';
+  addAiBtn.style.margin = '4px 0';
+  addAiBtn.addEventListener('click', () => addAiSlot(state.models));
+  aiConfigDiv.appendChild(addAiBtn);
+
+  const startBtn = document.getElementById('startBtn');
+  updateStartBtn(state);
+  startBtn.addEventListener('click', () => {
+    socket.emit('lobby:start', null, (response) => {
+      if (response && response.ok) {
+        document.getElementById('lobbyContent').innerHTML = '<p style="text-align:center;color:var(--color-primary);">GAME STARTING...</p>';
+      }
+    });
+  });
+}
+
+function addAiSlot(models) {
+  const container = document.getElementById('aiConfig');
+  const slot = document.createElement('div');
+  slot.style.display = 'flex';
+  slot.style.gap = '8px';
+  slot.style.margin = '4px 0';
+  const select = document.createElement('select');
+  if (models.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = 'llama3';
+    opt.textContent = 'llama3 (default)';
+    select.appendChild(opt);
+  } else {
+    models.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      select.appendChild(opt);
+    });
+  }
+  select.style.flex = '1';
+  const removeBtn = document.createElement('button');
+  removeBtn.textContent = 'X';
+  removeBtn.addEventListener('click', () => {
+    slot.remove();
+    const state = { players: getCurrentPlayers(), models };
+    updateStartBtn(state);
+  });
+  slot.appendChild(select);
+  slot.appendChild(removeBtn);
+  container.appendChild(slot);
+  const state = { players: getCurrentPlayers(), models };
+  updateStartBtn(state);
+}
+
+function getCurrentPlayers() {
+  const list = document.getElementById('playerList');
+  if (!list) return [];
+  const items = list.querySelectorAll('.player-entry');
+  return Array.from(items).map(el => ({
+    isHuman: el.dataset.isHuman === 'true',
+  }));
+}
+
+function updateStartBtn(state) {
+  const startBtn = document.getElementById('startBtn');
+  if (!startBtn) return;
+  const humans = (state.players || []).filter(p => p.isHuman).length;
+  const aiSlots = document.querySelectorAll('#aiConfig select').length;
+  startBtn.disabled = !(humans >= 2 && aiSlots >= 1);
+}
+
+function renderPlayerList(players) {
+  const list = document.getElementById('playerList');
+  list.innerHTML = '';
+  players.forEach(p => {
+    const div = document.createElement('div');
+    div.className = 'player-entry';
+    div.dataset.isHuman = p.isHuman;
+    div.style.display = 'flex';
+    div.style.justifyContent = 'space-between';
+    div.style.padding = '4px 0';
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = `> ${p.name}`;
+    const typeSpan = document.createElement('span');
+    typeSpan.textContent = p.isHuman ? 'HUMAN' : 'AI';
+    typeSpan.style.color = p.isHuman ? 'var(--color-primary)' : 'var(--color-warning)';
+    div.appendChild(nameSpan);
+    div.appendChild(typeSpan);
+    list.appendChild(div);
+  });
+}
+
+socket.on('lobby:state', (state) => {
+  showLobby(state);
+});
+
+socket.on('host:assigned', () => {
+  const waitingMsg = document.getElementById('waitingMsg');
+  if (waitingMsg) waitingMsg.textContent = 'you are now the host';
+});
+
+socket.on('game:state', (state) => {
+  window.location.href = 'game.html';
+});
+
+socket.on('error', ({ message }) => {
+  const errDiv = document.createElement('div');
+  errDiv.style.color = 'var(--color-danger)';
+  errDiv.style.textAlign = 'center';
+  errDiv.style.marginTop = '8px';
+  errDiv.textContent = `> ERROR: ${message}`;
+  app.appendChild(errDiv);
+});
+
+render();

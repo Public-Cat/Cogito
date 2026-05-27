@@ -1,0 +1,15 @@
+{
+  "name": "cogito-game",
+  "version": "1.0.0",
+  "description": "AI Social Deduction Game",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.0",
+    "socket.io": "^4.7.0",
+    "node-fetch": "^3.3.0"
+  }
+}

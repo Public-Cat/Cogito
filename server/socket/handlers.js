@@ -1,0 +1,216 @@
+import gameManager from '../game/GameManager.js';
+import { getModels } from '../ollama/OllamaClient.js';
+
+const NAME_REGEX = /^[a-zA-Z0-9 ]{1,20}$/;
+const MAX_MESSAGE_LENGTH = 500;
+
+function sanitize(str) {
+  return str.replace(/[<>&"']/g, '');
+}
+
+export function registerHandlers(io, socket) {
+  const session = gameManager.getOrCreateSession();
+
+  socket.on('lobby:setName', async ({ name } = {}) => {
+    try {
+      if (!name || !NAME_REGEX.test(name)) {
+        socket.emit('error', { message: 'Name must be 1-20 characters, alphanumeric with spaces.' });
+        return;
+      }
+      const sanitizedName = sanitize(name.trim());
+
+      const existingPlayer = session.getPlayerBySocket(socket.id);
+      if (existingPlayer) {
+        existingPlayer.name = sanitizedName;
+      } else {
+        const playerId = gameManager.generatePlayerId();
+        const player = session.addPlayer(playerId, true, socket.id);
+        player.name = sanitizedName;
+      }
+
+      session.assignHost();
+      const models = await getModels();
+      const state = {
+        players: session.players.map(p => ({
+          id: p.id,
+          name: p.name,
+          isHuman: p.isHuman,
+          isHost: p.isHost,
+        })),
+        models,
+        isHost: session.getHost()?.socketId === socket.id,
+      };
+      socket.emit('lobby:state', state);
+
+      const host = session.getHost();
+      if (host && host.socketId !== socket.id) {
+        io.to(host.socketId).emit('lobby:state', {
+          ...state,
+          isHost: true,
+        });
+        io.to(host.socketId).emit('host:assigned');
+      }
+    } catch (err) {
+      console.error('lobby:setName error:', err);
+      socket.emit('error', { message: 'Failed to set name.' });
+    }
+  });
+
+  socket.on('lobby:configure', ({ topic, aiPlayers } = {}) => {
+    try {
+      const player = session.getPlayerBySocket(socket.id);
+      if (!player || !player.isHost) {
+        socket.emit('error', { message: 'Only the host can configure the game.' });
+        return;
+      }
+    } catch (err) {
+      console.error('lobby:configure error:', err);
+      socket.emit('error', { message: 'Failed to configure.' });
+    }
+  });
+
+  socket.on('lobby:start', async (_data, callback) => {
+    try {
+      const player = session.getPlayerBySocket(socket.id);
+      if (!player || !player.isHost) {
+        socket.emit('error', { message: 'Only the host can start the game.' });
+        return;
+      }
+
+      const humans = session.players.filter(p => p.isHuman);
+      const aiConfigs = session.players.filter(p => !p.isHuman);
+
+      if (humans.length < 2 || aiConfigs.length < 1) {
+        socket.emit('error', { message: 'Need at least 2 humans and 1 AI player.' });
+        return;
+      }
+
+      const config = {
+        topic: null,
+        aiPlayers: aiConfigs.map(p => ({ model: p.model })),
+      };
+
+      await session.startGame(config);
+
+      for (const p of session.players) {
+        if (p.socketId) {
+          io.to(p.socketId).emit('game:state', session.getGameState());
+        }
+      }
+
+      session.emitToAll = (event, data) => {
+        io.emit(event, data);
+      };
+      session.emitToSocket = (socketId, event, data) => {
+        io.to(socketId).emit(event, data);
+      };
+
+      if (typeof callback === 'function') callback({ ok: true });
+
+      setTimeout(() => {
+        const firstPlayer = session.turnOrder[0];
+        if (firstPlayer && !firstPlayer.isHuman) {
+          session.handleTurn();
+        }
+      }, 500);
+    } catch (err) {
+      console.error('lobby:start error:', err);
+      socket.emit('error', { message: 'Failed to start game.' });
+    }
+  });
+
+  socket.on('game:sendMessage', ({ text } = {}) => {
+    try {
+      if (!text || text.length > MAX_MESSAGE_LENGTH) {
+        socket.emit('error', { message: 'Message must be 1-500 characters.' });
+        return;
+      }
+
+      const player = session.getPlayerBySocket(socket.id);
+      if (!player) {
+        socket.emit('error', { message: 'Player not found.' });
+        return;
+      }
+
+      if (session.state !== 'PLAYING') {
+        socket.emit('error', { message: 'Not in playing phase.' });
+        return;
+      }
+
+      const currentPlayer = session.turnOrder[session.currentTurnIndex];
+      if (!currentPlayer || currentPlayer.id !== player.id) {
+        socket.emit('error', { message: 'It is not your turn.' });
+        return;
+      }
+
+      const sanitizedText = sanitize(text.trim());
+      const message = {
+        playerId: player.id,
+        playerName: player.name,
+        text: sanitizedText,
+        timestamp: Date.now(),
+      };
+      session.messages.push(message);
+      io.emit('game:newMessage', message);
+
+      session.advanceTurn();
+    } catch (err) {
+      console.error('game:sendMessage error:', err);
+      socket.emit('error', { message: 'Failed to send message.' });
+    }
+  });
+
+  socket.on('game:vote', ({ targetId } = {}) => {
+    try {
+      const player = session.getPlayerBySocket(socket.id);
+      if (!player) {
+        socket.emit('error', { message: 'Player not found.' });
+        return;
+      }
+
+      if (session.state !== 'VOTING') {
+        socket.emit('error', { message: 'Not in voting phase.' });
+        return;
+      }
+
+      const target = session.getPlayer(targetId);
+      if (!target || target.isEliminated) {
+        socket.emit('error', { message: 'Invalid vote target.' });
+        return;
+      }
+
+      session.submitHumanVote(player.id, targetId);
+    } catch (err) {
+      console.error('game:vote error:', err);
+      socket.emit('error', { message: 'Failed to submit vote.' });
+    }
+  });
+
+  socket.on('game:returnToLobby', () => {
+    try {
+      gameManager.reset();
+      socket.emit('lobby:state', {
+        players: [],
+        models: [],
+        isHost: true,
+      });
+    } catch (err) {
+      console.error('game:returnToLobby error:', err);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    try {
+      const currentSession = gameManager.getSession();
+      if (currentSession) {
+        currentSession.handleDisconnect(socket.id);
+        const host = currentSession.getHost();
+        if (host && host.socketId) {
+          io.to(host.socketId).emit('host:assigned');
+        }
+      }
+    } catch (err) {
+      console.error('disconnect error:', err);
+    }
+  });
+}
