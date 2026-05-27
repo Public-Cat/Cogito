@@ -69,7 +69,7 @@ export function registerHandlers(io, socket) {
     }
   });
 
-  socket.on('lobby:start', async (_data, callback) => {
+  socket.on('lobby:start', async ({ topic, aiPlayers } = {}, callback) => {
     try {
       const player = session.getPlayerBySocket(socket.id);
       if (!player || !player.isHost) {
@@ -78,17 +78,18 @@ export function registerHandlers(io, socket) {
       }
 
       const humans = session.players.filter(p => p.isHuman);
-      const aiConfigs = session.players.filter(p => !p.isHuman);
 
-      if (humans.length < 2 || aiConfigs.length < 1) {
-        socket.emit('error', { message: 'Need at least 2 humans and 1 AI player.' });
+      if (humans.length < 2) {
+        socket.emit('error', { message: 'Need at least 2 human players.' });
         return;
       }
 
-      const config = {
-        topic: null,
-        aiPlayers: aiConfigs.map(p => ({ model: p.model })),
-      };
+      if (!aiPlayers || aiPlayers.length < 1) {
+        socket.emit('error', { message: 'Need at least 1 AI player.' });
+        return;
+      }
+
+      const config = { topic: topic || null, aiPlayers };
 
       await session.startGame(config);
 
