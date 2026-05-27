@@ -285,6 +285,10 @@ socket.on('game:ended', (data) => {
   showEndScreen(data);
 });
 
+socket.on('lobby:state', () => {
+  window.location.href = 'index.html';
+});
+
 socket.on('error', ({ message }) => {
   const container = document.getElementById('messages');
   if (container) {
