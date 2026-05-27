@@ -1,6 +1,6 @@
 import { io } from "socket.io-client";
 
-const BASE = "http://localhost:3000";
+const BASE = "http://192.168.1.32:3000";
 
 async function main() {
   console.log("=== E2E Test: Full game flow ===\n");
