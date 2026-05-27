@@ -173,8 +173,6 @@ export class GameSession {
       return;
     }
 
-    this.emitGameState();
-
     if (!currentPlayer.isHuman) {
       const transcript = this.buildRoundTranscript();
       if (transcript) {
@@ -251,6 +249,7 @@ export class GameSession {
     this.aiVotesResolved = false;
     this.humanVotesResolved = false;
     this.emitToAll('game:voteStart', { roundNumber: this.round });
+    this.emitGameState();
     this.collectAIVotes();
     this.voteTimeout = setTimeout(() => {
       this.humanVotesResolved = true;

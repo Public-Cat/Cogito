@@ -22,6 +22,7 @@ const gameManager = {
 
   reset() {
     this.currentSession = null;
+    this.playerCounter = 0;
   },
 };
 
