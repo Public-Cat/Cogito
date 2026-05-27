@@ -5,10 +5,6 @@ const socket = io();
 let myId = sessionStorage.getItem('cogito_myId') || null;
 let gameState = null;
 
-if (myId) {
-  socket.emit('game:rejoin', { playerId: myId });
-}
-
 const app = document.getElementById('app');
 
 function render() {
@@ -300,3 +296,7 @@ socket.on('error', ({ message }) => {
 });
 
 render();
+
+if (myId) {
+  socket.emit('game:rejoin', { playerId: myId });
+}
