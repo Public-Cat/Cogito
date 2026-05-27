@@ -1,0 +1,17 @@
+export const topics = [
+  'Would you rather live in the city or the countryside?',
+  'What makes a piece of music unforgettable?',
+  'Is it ever okay to lie to someone you love?',
+  'What makes a great leader?',
+  'If you could master one skill instantly, what would it be?',
+  'What is the most important quality in a friend?',
+  'Should animals have the same rights as humans?',
+  'What does it mean to live a good life?',
+  'Is technology making us more or less connected?',
+  'What is the best book you have ever read and why?',
+  'If you could travel anywhere, where would you go?',
+  'What is the most important invention in human history?',
+  'Is it better to be talented or hardworking?',
+  'What is your earliest memory?',
+  'If you could have dinner with any historical figure, who would it be?',
+];
