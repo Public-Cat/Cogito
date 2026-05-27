@@ -1,5 +1,5 @@
 import gameManager from '../game/GameManager.js';
-import { getModels } from '../ollama/OllamaClient.js';
+import { getCachedModels } from '../ollama/OllamaClient.js';
 
 const NAME_REGEX = /^[a-zA-Z0-9 ]{1,20}$/;
 const MAX_MESSAGE_LENGTH = 500;
@@ -29,7 +29,7 @@ export function registerHandlers(io, socket) {
       }
 
       session.assignHost();
-      const models = await getModels();
+      const models = getCachedModels();
       const state = {
         players: session.players.map(p => ({
           id: p.id,
