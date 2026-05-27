@@ -191,6 +191,7 @@ export class GameSession {
       };
       this.messages.push(message);
       this.emitToAll('game:newMessage', message);
+      this.advanceTurn();
     }
   }
 
