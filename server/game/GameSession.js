@@ -395,6 +395,11 @@ export class GameSession {
   }
 
   emitGameState() {
-    this.emitToAll('game:state', this.getGameState());
+    const state = this.getGameState();
+    for (const p of this.players) {
+      if (p.socketId) {
+        this.emitToSocket(p.socketId, 'game:state', { ...state, myId: p.id });
+      }
+    }
   }
 }
