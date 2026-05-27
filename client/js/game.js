@@ -68,8 +68,8 @@ function sendMessage() {
 
 function updateUI(state) {
   gameState = state;
-  if (!myId && state.players.length > 0) {
-    myId = state.players[0].id;
+  if (state.myId) {
+    myId = state.myId;
   }
 
   document.getElementById('topicDisplay').textContent = `> ${state.topic || 'no topic'}`;

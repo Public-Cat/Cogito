@@ -24,12 +24,13 @@ export function registerHandlers(io, socket) {
         existingPlayer.name = sanitizedName;
       } else {
         const playerId = gameManager.generatePlayerId();
-        const player = session.addPlayer(playerId, true, socket.id);
-        player.name = sanitizedName;
+        const newPlayer = session.addPlayer(playerId, true, socket.id);
+        newPlayer.name = sanitizedName;
       }
 
       session.assignHost();
       const models = getCachedModels();
+      const myId = session.getPlayerBySocket(socket.id)?.id || null;
       const state = {
         players: session.players.map(p => ({
           id: p.id,
@@ -37,6 +38,7 @@ export function registerHandlers(io, socket) {
           isHuman: p.isHuman,
           isHost: p.isHost,
         })),
+        myId,
         models,
         isHost: session.getHost()?.socketId === socket.id,
       };
@@ -44,10 +46,12 @@ export function registerHandlers(io, socket) {
 
       const host = session.getHost();
       if (host && host.socketId !== socket.id) {
-        io.to(host.socketId).emit('lobby:state', {
+        const hostState = {
           ...state,
+          myId: host.id,
           isHost: true,
-        });
+        };
+        io.to(host.socketId).emit('lobby:state', hostState);
         io.to(host.socketId).emit('host:assigned');
       }
     } catch (err) {
@@ -93,9 +97,10 @@ export function registerHandlers(io, socket) {
 
       await session.startGame(config);
 
+      const gameState = session.getGameState();
       for (const p of session.players) {
         if (p.socketId) {
-          io.to(p.socketId).emit('game:state', session.getGameState());
+          io.to(p.socketId).emit('game:state', { ...gameState, myId: p.id });
         }
       }
 
