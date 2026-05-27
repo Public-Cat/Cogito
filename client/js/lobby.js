@@ -89,6 +89,9 @@ function showLobby(state) {
 }
 
 function setupHostPanel(state) {
+  const prevModels = Array.from(document.querySelectorAll('#aiConfig select')).map(sel => sel.value);
+  const prevTopic = document.getElementById('topicSelect')?.value || '';
+
   const topicSelect = document.getElementById('topicSelect');
   topicSelect.innerHTML = '<option value="">-- random --</option>';
   const topics = [
@@ -114,9 +117,41 @@ function setupHostPanel(state) {
     opt.textContent = t;
     topicSelect.appendChild(opt);
   });
+  if (prevTopic) topicSelect.value = prevTopic;
 
   const aiConfigDiv = document.getElementById('aiConfig');
   aiConfigDiv.innerHTML = '<label>AI players:</label>';
+  prevModels.forEach(model => {
+    const slot = document.createElement('div');
+    slot.style.display = 'flex';
+    slot.style.gap = '8px';
+    slot.style.margin = '4px 0';
+    const select = document.createElement('select');
+    if (state.models.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = 'llama3';
+      opt.textContent = 'llama3 (default)';
+      select.appendChild(opt);
+    } else {
+      state.models.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m;
+        opt.textContent = m;
+        select.appendChild(opt);
+      });
+    }
+    select.value = model;
+    select.style.flex = '1';
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = 'X';
+    removeBtn.addEventListener('click', () => {
+      slot.remove();
+      updateStartBtn(state);
+    });
+    slot.appendChild(select);
+    slot.appendChild(removeBtn);
+    aiConfigDiv.appendChild(slot);
+  });
   const addAiBtn = document.createElement('button');
   addAiBtn.textContent = '+ ADD AI';
   addAiBtn.style.margin = '4px 0';
@@ -126,7 +161,11 @@ function setupHostPanel(state) {
   const startBtn = document.getElementById('startBtn');
   updateStartBtn(state);
   startBtn.addEventListener('click', () => {
-    socket.emit('lobby:start', null, (response) => {
+    const aiSlots = document.querySelectorAll('#aiConfig select');
+    const aiPlayers = Array.from(aiSlots).map(select => ({ model: select.value }));
+    const topicSelect = document.getElementById('topicSelect');
+    const topic = topicSelect.value || null;
+    socket.emit('lobby:start', { topic, aiPlayers }, (response) => {
       if (response && response.ok) {
         clearScrambles();
         document.getElementById('lobbyContent').innerHTML = '<p style="text-align:center;color:var(--color-primary);">GAME STARTING...</p>';
