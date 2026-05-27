@@ -1,6 +1,6 @@
 import fetch from 'node-fetch';
 
-const BASE_URL = process.env.OLLAMA_BASE_URL || 'http://host.docker.internal:11434';
+const BASE_URL = process.env.OLLAMA_BASE_URL || 'http://192.168.1.30:11434';
 const TIMEOUT_MS = 30000;
 
 async function fetchWithTimeout(url, options, timeoutMs = TIMEOUT_MS) {
