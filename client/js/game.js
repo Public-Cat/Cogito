@@ -2,8 +2,12 @@ import { playVote, playEliminated, playWin, playLose } from './sfx.js';
 
 const socket = io();
 
-let myId = null;
+let myId = sessionStorage.getItem('cogito_myId') || null;
 let gameState = null;
+
+if (myId) {
+  socket.emit('game:rejoin', { playerId: myId });
+}
 
 const app = document.getElementById('app');
 

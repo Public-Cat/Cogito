@@ -205,6 +205,22 @@ export function registerHandlers(io, socket) {
     }
   });
 
+  socket.on('game:rejoin', ({ playerId } = {}) => {
+    try {
+      const currentSession = gameManager.getSession();
+      if (!currentSession || currentSession.state === 'LOBBY') return;
+      const player = currentSession.getPlayer(playerId);
+      if (!player) return;
+      player.socketId = socket.id;
+      player.isDisconnected = false;
+      player.isActive = true;
+      const gameState = currentSession.getGameState();
+      socket.emit('game:state', { ...gameState, myId: player.id });
+    } catch (err) {
+      console.error('game:rejoin error:', err);
+    }
+  });
+
   socket.on('disconnect', () => {
     try {
       const currentSession = gameManager.getSession();
