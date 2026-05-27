@@ -60,19 +60,6 @@ export function registerHandlers(io, socket) {
     }
   });
 
-  socket.on('lobby:configure', ({ topic, aiPlayers } = {}) => {
-    try {
-      const player = session.getPlayerBySocket(socket.id);
-      if (!player || !player.isHost) {
-        socket.emit('error', { message: 'Only the host can configure the game.' });
-        return;
-      }
-    } catch (err) {
-      console.error('lobby:configure error:', err);
-      socket.emit('error', { message: 'Failed to configure.' });
-    }
-  });
-
   socket.on('lobby:start', async ({ topic, aiPlayers } = {}, callback) => {
     try {
       const player = session.getPlayerBySocket(socket.id);

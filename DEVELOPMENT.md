@@ -103,7 +103,6 @@ Define and implement these events precisely. Do not rename them.
 | Event | Payload | Description |
 |---|---|---|
 | `lobby:setName` | `{ name: string }` | Human player sets their display name |
-| `lobby:configure` | `{ topic: string \| null, aiPlayers: [{model: string}] }` | Host submits game configuration |
 | `lobby:start` | — | Host starts the game |
 | `game:sendMessage` | `{ text: string }` | Player sends their turn message |
 | `game:vote` | `{ targetId: string }` | Human player submits their vote |
@@ -193,7 +192,7 @@ All prompts live in `server/ollama/prompts.js`. No prompt strings should appear 
 
 ```js
 export function buildSystemPrompt(playerName, topic, allPlayerNames) { ... }
-export function buildVotePrompt(playerName, activePlayerNames, chatHistory) { ... }
+export function buildVotePrompt(playerName, activePlayerNames) { ... }
 export function buildNamePrompt() { ... }
 ```
 

@@ -120,12 +120,13 @@ export class GameSession {
 
   async startGame(config) {
     this.topic = config.topic || topicList[Math.floor(Math.random() * topicList.length)];
+    this.messages = [];
     for (const p of this.players) {
       p.isHost = false;
       p.isEliminated = false;
     }
     const aiConfigs = config.aiPlayers || [];
-    for (const cfg of aiConfigs) {
+    await Promise.all(aiConfigs.map(async (cfg) => {
       const aiPlayer = this.addPlayer(`ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, false, null);
       aiPlayer.model = cfg.model;
       try {
@@ -149,7 +150,7 @@ export class GameSession {
       aiPlayer.messageHistory = [
         { role: 'system', content: buildSystemPrompt(aiPlayer.name, this.topic, this.players.filter(p => p.isHuman).map(p => p.name)) },
       ];
-    }
+    }))
 
     const humanPlayers = this.players.filter(p => p.isHuman);
     const aiPlayers = this.players.filter(p => !p.isHuman);
@@ -348,12 +349,6 @@ export class GameSession {
       this.endGame('ais');
     } else if (aliveAIs.length === 0) {
       this.endGame('humans');
-    } else if (aliveHumans.length === 1 && aliveAIs.length === 1) {
-      const lastHuman = aliveHumans[0];
-      const lastAI = aliveAIs[0];
-      if (lastHuman.isEliminated && lastAI.isEliminated) {
-        this.endGame('ais');
-      }
     } else {
       this.state = STATES.PLAYING;
       while (this.currentTurnIndex < this.turnOrder.length) {
@@ -374,6 +369,10 @@ export class GameSession {
 
   endGame(winner) {
     this.state = STATES.ENDED;
+    if (this.voteTimeout) {
+      clearTimeout(this.voteTimeout);
+      this.voteTimeout = null;
+    }
     this.emitToAll('game:ended', {
       winner: winner || this.determineWinner(),
       players: this.players.map(p => ({
