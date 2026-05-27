@@ -1,8 +1,33 @@
 const socket = io();
 
-let myId = null;
+let scrambleIntervals = [];
 
 const app = document.getElementById('app');
+const SCRAMBLE_CHARS = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲンABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+function randomChar() {
+  return SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)];
+}
+
+function scrambleName(length) {
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += randomChar();
+  }
+  return result;
+}
+
+function startScramble(el, length) {
+  const interval = setInterval(() => {
+    el.textContent = '> ' + scrambleName(length);
+  }, 120);
+  scrambleIntervals.push(interval);
+}
+
+function clearScrambles() {
+  scrambleIntervals.forEach(clearInterval);
+  scrambleIntervals = [];
+}
 
 function render() {
   app.innerHTML = `
@@ -23,7 +48,8 @@ function render() {
           <div id="aiConfig"></div>
           <button id="startBtn" disabled style="width:100%;margin-top:12px;">> START GAME</button>
         </div>
-        <h3 style="margin-top:16px;">players in lobby:</h3>
+        <div id="playerCount" style="margin-top:12px;color:var(--color-text-dim);"></div>
+        <h3 style="margin-top:12px;">players in lobby:</h3>
         <div id="playerList"></div>
       </div>
     </div>
@@ -35,13 +61,14 @@ function render() {
   });
 }
 
-async function joinLobby() {
+function joinLobby() {
   const name = document.getElementById('nameInput').value.trim();
   if (!name) return;
   socket.emit('lobby:setName', { name });
 }
 
 function showLobby(state) {
+  clearScrambles();
   document.getElementById('joinPanel').style.display = 'none';
   const lobbyContent = document.getElementById('lobbyContent');
   lobbyContent.style.display = 'block';
@@ -101,6 +128,7 @@ function setupHostPanel(state) {
   startBtn.addEventListener('click', () => {
     socket.emit('lobby:start', null, (response) => {
       if (response && response.ok) {
+        clearScrambles();
         document.getElementById('lobbyContent').innerHTML = '<p style="text-align:center;color:var(--color-primary);">GAME STARTING...</p>';
       }
     });
@@ -160,6 +188,11 @@ function updateStartBtn(state) {
 }
 
 function renderPlayerList(players) {
+  const countDiv = document.getElementById('playerCount');
+  const humanCount = players.filter(p => p.isHuman).length;
+  const aiCount = players.filter(p => !p.isHuman).length;
+  countDiv.textContent = `> HUMANS: ${humanCount}  |  AIs: ${aiCount}`;
+
   const list = document.getElementById('playerList');
   list.innerHTML = '';
   players.forEach(p => {
@@ -169,14 +202,14 @@ function renderPlayerList(players) {
     div.style.display = 'flex';
     div.style.justifyContent = 'space-between';
     div.style.padding = '4px 0';
+
     const nameSpan = document.createElement('span');
-    nameSpan.textContent = `> ${p.name}`;
-    const typeSpan = document.createElement('span');
-    typeSpan.textContent = p.isHuman ? 'HUMAN' : 'AI';
-    typeSpan.style.color = p.isHuman ? 'var(--color-primary)' : 'var(--color-warning)';
+    nameSpan.textContent = '> ' + scrambleName(p.name.length);
     div.appendChild(nameSpan);
-    div.appendChild(typeSpan);
+
     list.appendChild(div);
+
+    startScramble(nameSpan, p.name.length);
   });
 }
 
@@ -189,7 +222,8 @@ socket.on('host:assigned', () => {
   if (waitingMsg) waitingMsg.textContent = 'you are now the host';
 });
 
-socket.on('game:state', (state) => {
+socket.on('game:state', () => {
+  clearScrambles();
   window.location.href = 'game.html';
 });
 
