@@ -257,8 +257,9 @@ export class GameSession {
     this.collectAIVotes();
     this.voteTimeout = setTimeout(() => {
       this.humanVotesResolved = true;
+      this.aiVotesResolved = true;
       this.tryResolveVotes();
-    }, 30000);
+    }, 45000);
   }
 
   async collectAIVotes() {
@@ -267,17 +268,21 @@ export class GameSession {
     const activePlayerNames = activePlayers.map(p => p.name);
 
     const votePromises = aiPlayers.map(async (ai) => {
-      const prompt = buildVotePrompt(ai.name, activePlayerNames);
-      ai.messageHistory.push({ role: 'user', content: prompt });
-      const voteResponse = await chat(ai.model, ai.messageHistory);
-      ai.messageHistory.push({ role: 'assistant', content: voteResponse });
-      const voteTarget = activePlayers.find(p => p.name.toLowerCase() === voteResponse.trim().toLowerCase());
-      if (voteTarget) {
-        this.aiVotes.set(ai.id, voteTarget.id);
+      try {
+        const prompt = buildVotePrompt(ai.name, activePlayerNames);
+        ai.messageHistory.push({ role: 'user', content: prompt });
+        const voteResponse = await chat(ai.model, ai.messageHistory);
+        ai.messageHistory.push({ role: 'assistant', content: voteResponse });
+        const voteTarget = activePlayers.find(p => p.name.toLowerCase() === voteResponse.trim().toLowerCase());
+        if (voteTarget) {
+          this.aiVotes.set(ai.id, voteTarget.id);
+        }
+      } catch (err) {
+        console.error(`AI vote failed for ${ai.name}:`, err.message);
       }
     });
 
-    await Promise.all(votePromises);
+    await Promise.allSettled(votePromises);
     this.aiVotesResolved = true;
     this.tryResolveVotes();
   }
