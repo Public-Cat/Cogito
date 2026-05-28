@@ -9,10 +9,9 @@ function sanitize(str) {
 }
 
 export function registerHandlers(io, socket) {
-  const session = gameManager.getOrCreateSession();
-
   socket.on('lobby:setName', async ({ name } = {}) => {
     try {
+      const session = gameManager.getOrCreateSession();
       if (!name || !NAME_REGEX.test(name)) {
         socket.emit('error', { message: 'Name must be 1-20 characters, alphanumeric with spaces.' });
         return;
@@ -62,6 +61,7 @@ export function registerHandlers(io, socket) {
 
   socket.on('lobby:start', async ({ topic, aiPlayers } = {}, callback) => {
     try {
+      const session = gameManager.getOrCreateSession();
       const player = session.getPlayerBySocket(socket.id);
       if (!player || !player.isHost) {
         socket.emit('error', { message: 'Only the host can start the game.' });
@@ -114,6 +114,11 @@ export function registerHandlers(io, socket) {
 
   socket.on('game:sendMessage', ({ text } = {}) => {
     try {
+      const session = gameManager.getSession();
+      if (!session) {
+        socket.emit('error', { message: 'No active game session.' });
+        return;
+      }
       if (!text || text.length > MAX_MESSAGE_LENGTH) {
         socket.emit('error', { message: 'Message must be 1-500 characters.' });
         return;
@@ -155,6 +160,11 @@ export function registerHandlers(io, socket) {
 
   socket.on('game:vote', ({ targetId } = {}) => {
     try {
+      const session = gameManager.getSession();
+      if (!session) {
+        socket.emit('error', { message: 'No active game session.' });
+        return;
+      }
       const player = session.getPlayerBySocket(socket.id);
       if (!player) {
         socket.emit('error', { message: 'Player not found.' });
