@@ -162,11 +162,12 @@ export class GameSession {
 
   async handleTurn() {
     if (this.state !== STATES.PLAYING) return;
-    const activePlayers = this.getAlivePlayers();
+    const activePlayers = this.players.filter(p => !p.isEliminated);
     if (activePlayers.length <= 1) {
       this.endGame();
       return;
     }
+    if (activePlayers.every(p => p.isDisconnected)) return;
 
     const currentPlayer = this.turnOrder[this.currentTurnIndex];
     if (!currentPlayer || currentPlayer.isEliminated || currentPlayer.isDisconnected) {
@@ -181,6 +182,7 @@ export class GameSession {
       }
       currentPlayer.messageHistory.push({ role: 'user', content: 'It is your turn to respond.' });
       const reply = await chat(currentPlayer.model, currentPlayer.messageHistory);
+      if (this.state !== STATES.PLAYING) return;
       currentPlayer.messageHistory.push({ role: 'assistant', content: reply });
       const message = {
         playerId: currentPlayer.id,
@@ -196,11 +198,12 @@ export class GameSession {
 
   advanceTurn() {
     if (this.state !== STATES.PLAYING) return;
-    const alivePlayers = this.getAlivePlayers();
-    if (alivePlayers.length <= 1) {
+    const activePlayers = this.players.filter(p => !p.isEliminated);
+    if (activePlayers.length <= 1) {
       this.endGame();
       return;
     }
+    if (activePlayers.every(p => p.isDisconnected)) return;
 
     this.currentTurnIndex++;
     if (this.currentTurnIndex >= this.turnOrder.length) {
