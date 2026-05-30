@@ -91,6 +91,10 @@ function updateUI(state) {
       const currentPlayer = state.players.find(p => p.id === state.currentTurn);
       turnIndicator.textContent = currentPlayer ? `> waiting for ${currentPlayer.name}...` : '> waiting...';
     }
+  } else if (state.phase === 'VOTING_SOON') {
+    input.disabled = true;
+    sendBtn.disabled = true;
+    turnIndicator.textContent = '> voting in 30s...';
   } else {
     input.disabled = true;
     sendBtn.disabled = true;
@@ -103,7 +107,19 @@ function updateUI(state) {
 function renderPlayerList(players, currentTurnId) {
   const sidebar = document.getElementById('playerSidebar');
   sidebar.style.display = 'block';
-  sidebar.innerHTML = '<h3 style="margin-bottom:8px;color:var(--color-text-dim);">players</h3>';
+  sidebar.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <h3 style="color:var(--color-text-dim);margin:0;">players</h3>
+      <button id="sidebarClose" style="background:none;border:none;color:var(--color-text);cursor:pointer;font-family:var(--font-mono);font-size:16px;padding:2px 6px;">X</button>
+    </div>
+  `;
+  const closeBtn = sidebar.querySelector('#sidebarClose');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      sidebar.classList.remove('open');
+      document.getElementById('sidebarToggle').textContent = '[+]';
+    });
+  }
   players.forEach(p => {
     const div = document.createElement('div');
     div.style.padding = '4px 0';
@@ -173,14 +189,14 @@ function showVotingOverlay() {
   overlay.style.display = 'flex';
   const targetsDiv = document.getElementById('voteTargets');
   targetsDiv.innerHTML = '';
-  document.getElementById('voteTimer').textContent = '30';
+  document.getElementById('voteTimer').textContent = '10';
   document.getElementById('voteWaiting').style.display = 'none';
 
   if (!gameState) return;
   const activePlayers = gameState.players.filter(p => !p.isEliminated);
   const me = gameState.players.find(p => p.id === myId);
 
-  if (me && me.isHuman) {
+  if (me && me.isHuman && !me.isEliminated) {
     activePlayers.forEach(p => {
       if (p.id === myId) return;
       const btn = document.createElement('button');
@@ -198,7 +214,7 @@ function showVotingOverlay() {
     targetsDiv.innerHTML = '<p style="color:var(--color-text-dim);">> waiting for humans to vote...</p>';
   }
 
-  let timeLeft = 30;
+  let timeLeft = 10;
   const timer = setInterval(() => {
     timeLeft--;
     document.getElementById('voteTimer').textContent = timeLeft;
@@ -262,6 +278,20 @@ socket.on('game:newMessage', (msg) => {
   if (gameState) {
     gameState.messages.push(msg);
   }
+});
+
+socket.on('game:votingSoon', ({ delay }) => {
+  const container = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.style.margin = '8px 0';
+  div.style.padding = '8px';
+  div.style.border = '1px solid var(--color-warning)';
+  div.style.color = 'var(--color-warning)';
+  div.textContent = `> VOTING IN ${delay}s...`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  const turnIndicator = document.getElementById('turnIndicator');
+  turnIndicator.textContent = `> voting in ${delay}s...`;
 });
 
 socket.on('game:voteStart', () => {
