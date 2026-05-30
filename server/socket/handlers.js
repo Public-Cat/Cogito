@@ -189,6 +189,19 @@ export function registerHandlers(io, socket) {
     }
   });
 
+  socket.on('lobby:reset', () => {
+    try {
+      gameManager.reset();
+      io.emit('lobby:state', {
+        players: [],
+        models: [],
+        isHost: false,
+      });
+    } catch (err) {
+      console.error('lobby:reset error:', err);
+    }
+  });
+
   socket.on('game:returnToLobby', () => {
     try {
       gameManager.reset();

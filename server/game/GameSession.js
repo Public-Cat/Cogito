@@ -6,6 +6,7 @@ import { buildSystemPrompt, buildVotePrompt, buildNamePrompt } from '../ollama/p
 const STATES = {
   LOBBY: 'LOBBY',
   PLAYING: 'PLAYING',
+  VOTING_SOON: 'VOTING_SOON',
   VOTING: 'VOTING',
   ENDED: 'ENDED',
 };
@@ -81,7 +82,7 @@ export class GameSession {
     if (this.state === STATES.LOBBY) {
       this.removePlayer(socketId);
       if (player.isHost) this.assignHost();
-    } else if (this.state === STATES.PLAYING || this.state === STATES.VOTING) {
+    } else if (this.state === STATES.PLAYING || this.state === STATES.VOTING || this.state === STATES.VOTING_SOON) {
       player.isDisconnected = true;
       player.isActive = false;
     }
@@ -210,7 +211,10 @@ export class GameSession {
       this.currentTurnIndex = 0;
       this.round++;
       if (this.round >= 2) {
-        this.startVoting();
+        this.state = STATES.VOTING_SOON;
+        this.emitToAll('game:votingSoon', { delay: 30 });
+        this.emitGameState();
+        setTimeout(() => this.startVoting(), 30000);
         return;
       }
     }
@@ -246,6 +250,7 @@ export class GameSession {
   }
 
   startVoting() {
+    if (this.state !== STATES.VOTING_SOON) return;
     this.state = STATES.VOTING;
     this.humanVotes = new Map();
     this.aiVotes = new Map();
@@ -259,7 +264,7 @@ export class GameSession {
       this.humanVotesResolved = true;
       this.aiVotesResolved = true;
       this.tryResolveVotes();
-    }, 45000);
+    }, 10000);
   }
 
   async collectAIVotes() {

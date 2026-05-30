@@ -7,6 +7,13 @@ async function main() {
 
   const t = (msg) => { console.log("  [" + (Date.now() % 100000) + "] " + msg); };
 
+  // 0. Reset any stale session
+  const resetSocket = io(BASE);
+  await new Promise(r => resetSocket.on("connect", r));
+  resetSocket.emit("lobby:reset");
+  await new Promise(r => setTimeout(r, 200));
+  resetSocket.disconnect();
+
   // 1. Player A (host) joins
   t("Player A (host) joining...");
   const socketA = io(BASE);

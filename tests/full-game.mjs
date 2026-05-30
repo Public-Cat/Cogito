@@ -82,9 +82,22 @@ async function main() {
       t("Voting phase triggered!");
       break;
     }
+
+    // VOTING_SOON means the game is waiting 30s before voting
+    if (state.phase === "VOTING_SOON") {
+      t("Voting will start in 30s (VOTING_SOON)...");
+    }
   }
 
   sA.removeListener("game:voteStart");
+
+  // Wait for voteStart if not yet received (VOTING_SOON phase with 30s delay)
+  if (!voteStarted) {
+    t("Waiting for voteStart event...");
+    await new Promise(r => sA.once("game:voteStart", r));
+    t("Vote started!");
+    state = await waitForState(sA);
+  }
 
   if (!state || state.phase !== "VOTING") {
     throw new Error("FAIL: Expected VOTING phase, got " + (state ? state.phase : "null"));

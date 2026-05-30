@@ -52,12 +52,20 @@ function render() {
         <h3 style="margin-top:12px;">players in lobby:</h3>
         <div id="playerList"></div>
       </div>
+      <div style="margin-top:12px;text-align:center;">
+        <button id="resetBtn" style="color:var(--color-danger);border-color:var(--color-danger);width:100%;">> HARD RESET</button>
+      </div>
     </div>
   `;
 
   document.getElementById('joinBtn').addEventListener('click', joinLobby);
   document.getElementById('nameInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') joinLobby();
+  });
+  document.getElementById('resetBtn').addEventListener('click', () => {
+    if (confirm('Reset all sessions and kick all players?')) {
+      socket.emit('lobby:reset');
+    }
   });
 }
 
@@ -69,8 +77,18 @@ function joinLobby() {
 
 function showLobby(state) {
   clearScrambles();
-  document.getElementById('joinPanel').style.display = 'none';
+  const joinPanel = document.getElementById('joinPanel');
   const lobbyContent = document.getElementById('lobbyContent');
+
+  if (!state.players || state.players.length === 0) {
+    joinPanel.style.display = 'block';
+    lobbyContent.style.display = 'none';
+    document.getElementById('playerCount').textContent = '';
+    document.getElementById('playerList').innerHTML = '';
+    return;
+  }
+
+  joinPanel.style.display = 'none';
   lobbyContent.style.display = 'block';
 
   const waitingMsg = document.getElementById('waitingMsg');

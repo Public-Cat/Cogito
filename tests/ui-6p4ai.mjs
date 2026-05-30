@@ -121,7 +121,14 @@ async function run() {
       pages.map(p => p.waitForSelector('#topicDisplay', { state: 'attached', timeout: 10000 }))
     );
 
-    // Verify game state
+    // Wait for actual game state (not the initial 'WAITING')
+    await pages[0].waitForFunction(
+      () => {
+        const el = document.getElementById('phaseDisplay');
+        return el && el.textContent !== 'WAITING';
+      },
+      undefined, { timeout: 15000 }
+    );
     const phase0 = await pages[0].textContent('#phaseDisplay');
     console.log(`  Host phase: ${phase0}`);
     console.assert(phase0 === 'PLAYING', `Phase should be PLAYING, got ${phase0}`);
@@ -164,13 +171,24 @@ async function run() {
       // Check if any page hit voting/ended
       for (const p of pages) {
         const phase = await p.textContent('#phaseDisplay');
-        if (phase === 'VOTING' || phase === 'ENDED') {
+        if (phase === 'VOTING' || phase === 'VOTING_SOON' || phase === 'ENDED') {
           console.log(`  Game reached: ${phase} after ${turnsPlayed} turns`);
           inVoting = true;
           break;
         }
       }
-      if (inVoting) break;
+      if (inVoting) {
+        // If VOTING_SOON, wait for actual VOTING
+        const phase = await pages[0].textContent('#phaseDisplay');
+        if (phase === 'VOTING_SOON') {
+          console.log('  Waiting for voting to start (VOTING_SOON)...');
+          await pages[0].waitForFunction(
+            () => ['VOTING', 'ENDED'].includes(document.getElementById('phaseDisplay').textContent),
+            undefined, { timeout: 60000 }
+          );
+        }
+        break;
+      }
 
       // Try each player's page to see if it's their turn
       let anySent = false;
@@ -222,6 +240,15 @@ async function run() {
         const phase = await pages[0].textContent('#phaseDisplay');
         if (phase === 'VOTING' || phase === 'ENDED') return phase;
 
+        if (phase === 'VOTING_SOON') {
+          console.log('  Waiting for voting to start (VOTING_SOON)...');
+          await pages[0].waitForFunction(
+            () => ['VOTING', 'ENDED'].includes(document.getElementById('phaseDisplay').textContent),
+            undefined, { timeout: 60000 }
+          );
+          return await pages[0].textContent('#phaseDisplay');
+        }
+
         let anySent = false;
         for (const p of pages) {
           const input = await p.$('#msgInput');
@@ -233,9 +260,12 @@ async function run() {
           anySent = true;
           break;
         }
-        if (!anySent) await sleep(1000);
+
+        if (!anySent) {
+          await sleep(1000); // AI is thinking or game processing
+        }
       }
-      return await pages[0].textContent('#phaseDisplay');
+      return pages[0].textContent('#phaseDisplay');
     }
 
     async function doVoteRound() {
@@ -252,23 +282,20 @@ async function run() {
       );
       console.log('  Voting overlay visible');
 
-      // Have each human vote for the first non-self target
+      // Have each non-eliminated human vote for the first non-self target
       for (let i = 0; i < NUM_HUMANS; i++) {
         const btns = await pages[i].$$('#voteTargets button');
         if (btns.length === 0) continue;
-        for (const btn of btns) {
-          const text = await btn.textContent();
-          if (text && !text.includes(HUMAN_NAMES[i])) {
-            await btn.click();
-            await sleep(200);
-            break;
-          }
-        }
+        const text = await btns[0].textContent();
+        const targetName = text ? text.replace('> VOTE ', '').trim() : '';
+        // Use text-based click which handles visibility better
+        await pages[i].click(`text=${targetName}`, { timeout: 5000, force: true }).catch(() => {});
+        await sleep(200);
       }
       console.log(`  All ${NUM_HUMANS} humans voted`);
 
       // Wait for vote resolution
-      await sleep(5000);
+      await sleep(3000);
       const phase = await pages[0].textContent('#phaseDisplay');
       console.log(`  After vote: ${phase}`);
       return phase;

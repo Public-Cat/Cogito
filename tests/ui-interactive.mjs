@@ -203,7 +203,7 @@ async function run() {
 
     while (turnsPlayed < maxTurns && !inVoting) {
       const phaseA = await pageA.textContent('#phaseDisplay');
-      if (phaseA === 'VOTING' || phaseA === 'ENDED') {
+      if (phaseA === 'VOTING' || phaseA === 'VOTING_SOON' || phaseA === 'ENDED') {
         console.log(`  Game state changed to: ${phaseA}`);
         inVoting = true;
         break;
@@ -231,7 +231,18 @@ async function run() {
       await sleep(1000);
     }
 
-    const finalPhase = await pageA.textContent('#phaseDisplay');
+    let finalPhase = await pageA.textContent('#phaseDisplay');
+
+    // If we hit VOTING_SOON, wait for the actual VOTING phase to begin
+    if (finalPhase === 'VOTING_SOON') {
+      console.log('  Voting will start in ~30s (VOTING_SOON)...');
+      await pageA.waitForFunction(
+        () => document.getElementById('phaseDisplay').textContent === 'VOTING',
+        undefined, { timeout: 60000 }
+      );
+      finalPhase = 'VOTING';
+    }
+
     const finalRound = await pageA.textContent('#roundDisplay');
     const totalMsgs = (await pageA.$$('#messages > *')).length;
     console.log(`  Phase: ${finalPhase}, ${finalRound}, Messages: ${totalMsgs}`);
@@ -268,10 +279,19 @@ async function run() {
       console.log(`  Vote buttons on A: ${voteButtons.length}`);
       console.assert(voteButtons.length >= 1, 'Should have vote buttons for active players');
 
-      // Player A votes (for the first non-self target)
+      // Both humans vote for the AI player (the name that appears on both
+      // players' vote buttons but isn't either human) to force elimination
+      const aVoteTexts = await Promise.all(voteButtons.map(b => b.textContent()));
+      console.log(`  A's vote options: ${aVoteTexts.join(', ')}`);
+
+      // Find the non-Alice, non-Bob name from A's vote options
+      const aiName = aVoteTexts
+        .map(t => t.replace('> VOTE ', '').trim())
+        .find(n => n !== 'Alice' && n !== 'Bob');
+
       for (const btn of voteButtons) {
         const text = await btn.textContent();
-        if (text && !text.includes('Alice')) {
+        if (text && aiName && text.includes(aiName)) {
           await btn.click();
           console.log(`  Player A voted: ${text}`);
           break;
@@ -283,13 +303,13 @@ async function run() {
       const voteWaiting = await pageA.textContent('#voteWaiting');
       console.log(`  After A vote: ${voteWaiting}`);
 
-      // Player B votes too
+      // Player B votes for the same AI
       await sleep(1000);
       const voteButtonsB = await pageB.$$('#voteTargets button');
       console.log(`  Vote buttons on B: ${voteButtonsB.length}`);
       for (const btn of voteButtonsB) {
         const text = await btn.textContent();
-        if (text && !text.includes('Bob')) {
+        if (text && aiName && text.includes(aiName)) {
           await btn.click();
           console.log(`  Player B voted: ${text}`);
           break;
