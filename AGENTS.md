@@ -3,6 +3,8 @@
 ## Workflow rules
 - **Never leave this directory.** The workspace root is `/home/agents/cogito`. Use `./tmp` instead of `/tmp` for temporary files.
 - **Always start new changes in a distinct feature branch.** Branch from `main`.
+- **Use git worktrees for parallel feature work.** Create each feature branch worktree in `./worktrees/<branch-name>` by running:
+  `git worktree add -b <branch-name> ./worktrees/<branch-name> main`
 - **Commit often, commit early, commit atomically.** Follow Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`).
 
 ## Stack
