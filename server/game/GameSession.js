@@ -185,10 +185,12 @@ export class GameSession {
     }
 
     if (!currentPlayer.isHuman) {
-      const transcript = this.buildRoundTranscript();
-      if (transcript) {
+      const newMessages = this.messages.slice(currentPlayer.lastMessageIndex);
+      if (newMessages.length > 0) {
+        const transcript = newMessages.map(m => `[${m.playerName}]: ${m.text}`).join('\n');
         currentPlayer.messageHistory.push({ role: 'user', content: transcript });
       }
+      currentPlayer.lastMessageIndex = this.messages.length;
       currentPlayer.messageHistory.push({ role: 'user', content: 'It is your turn to respond.' });
       const reply = await chat(currentPlayer.model, currentPlayer.messageHistory);
       if (this.state !== STATES.PLAYING) return;
@@ -238,15 +240,6 @@ export class GameSession {
         return;
       }
     }
-  }
-
-  buildRoundTranscript() {
-    if (this.messages.length === 0) return null;
-    const roundMessages = [];
-    for (const msg of this.messages) {
-      roundMessages.push(`[${msg.playerName}]: ${msg.text}`);
-    }
-    return roundMessages.join('\n');
   }
 
   startVoting() {
