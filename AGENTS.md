@@ -53,7 +53,7 @@
 | `server/game/GameSession.js` | Full game state machine, turn logic, vote resolution, win conditions |
 | `server/game/Player.js` | Player model |
 | `server/ollama/OllamaClient.js` | HTTP wrapper for Ollama `/api/chat` and `/api/tags` |
-| `server/ollama/prompts.js` | `buildSystemPrompt`, `buildVotePrompt`, `buildNamePrompt` |
+| `server/ollama/prompts.js` | `buildSystemPrompt`, `buildTurnPrompt`, `buildVotePrompt`, `buildNamePrompt` |
 | `server/socket/handlers.js` | All Socket.IO event handlers |
 
 ### Socket events (see `DEVELOPMENT.md` for the full table)
