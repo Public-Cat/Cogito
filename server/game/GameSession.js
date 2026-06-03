@@ -1,7 +1,7 @@
 import { Player } from './Player.js';
 import { topics as topicList } from './topics.js';
 import { chat } from '../ollama/OllamaClient.js';
-import { buildSystemPrompt, buildVotePrompt, buildNamePrompt } from '../ollama/prompts.js';
+import { buildSystemPrompt, buildTurnPrompt, buildVotePrompt, buildNamePrompt } from '../ollama/prompts.js';
 
 const STATES = {
   LOBBY: 'LOBBY',
@@ -157,7 +157,7 @@ export class GameSession {
         aiPlayer.name = `AI-${Math.random().toString(36).slice(2, 6)}`;
       }
       aiPlayer.messageHistory = [
-        { role: 'system', content: buildSystemPrompt(aiPlayer.name, this.topic, this.players.filter(p => p.isHuman).map(p => p.name)) },
+        { role: 'system', content: buildSystemPrompt(aiPlayer.name, this.topic, this.players.map(p => p.name)) },
       ];
     }))
 
@@ -191,7 +191,7 @@ export class GameSession {
         currentPlayer.messageHistory.push({ role: 'user', content: transcript });
       }
       currentPlayer.lastMessageIndex = this.messages.length;
-      currentPlayer.messageHistory.push({ role: 'user', content: 'It is your turn to respond.' });
+      currentPlayer.messageHistory.push({ role: 'user', content: buildTurnPrompt() });
       const reply = await chat(currentPlayer.model, currentPlayer.messageHistory);
       if (this.state !== STATES.PLAYING) return;
       currentPlayer.messageHistory.push({ role: 'assistant', content: reply });
@@ -267,11 +267,14 @@ export class GameSession {
 
     const votePromises = aiPlayers.map(async (ai) => {
       try {
-        const prompt = buildVotePrompt(ai.name, activePlayerNames);
+        const prompt = buildVotePrompt(activePlayerNames);
         ai.messageHistory.push({ role: 'user', content: prompt });
         const voteResponse = await chat(ai.model, ai.messageHistory);
         ai.messageHistory.push({ role: 'assistant', content: voteResponse });
-        const voteTarget = activePlayers.find(p => p.name.toLowerCase() === voteResponse.trim().toLowerCase());
+        const voteTarget = activePlayers
+          .slice()
+          .sort((a, b) => b.name.length - a.name.length)
+          .find(p => voteResponse.toLowerCase().includes(p.name.toLowerCase()));
         if (voteTarget) {
           this.aiVotes.set(ai.id, voteTarget.id);
         }
