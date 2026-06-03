@@ -83,9 +83,9 @@ async function main() {
       break;
     }
 
-    // VOTING_SOON means the game is waiting 30s before voting
+    // VOTING_SOON means the game is waiting 5s before voting
     if (state.phase === "VOTING_SOON") {
-      t("Voting will start in 30s (VOTING_SOON)...");
+      t("Voting will start in 5s (VOTING_SOON)...");
     }
   }
 
