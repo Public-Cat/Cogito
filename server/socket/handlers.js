@@ -177,7 +177,7 @@ export function registerHandlers(io, socket) {
       }
 
       const target = session.getPlayer(targetId);
-      if (!target || target.isEliminated) {
+      if (!target || target.isEliminated || target.isDisconnected) {
         socket.emit('error', { message: 'Invalid vote target.' });
         return;
       }

@@ -57,7 +57,7 @@ export class GameSession {
   }
 
   getActivePlayers() {
-    return this.players.filter(p => !p.isEliminated);
+    return this.players.filter(p => !p.isEliminated && !p.isDisconnected);
   }
 
   getAlivePlayers() {
