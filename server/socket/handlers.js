@@ -224,6 +224,12 @@ export function registerHandlers(io, socket) {
       player.socketId = socket.id;
       player.isDisconnected = false;
       player.isActive = true;
+      if (currentSession.state === 'PLAYING') {
+        const currentPlayer = currentSession.turnOrder[currentSession.currentTurnIndex];
+        if (currentPlayer && currentPlayer.isDisconnected) {
+          currentSession.advanceTurn();
+        }
+      }
       const gameState = currentSession.getGameState();
       socket.emit('game:state', { ...gameState, myId: player.id });
     } catch (err) {
