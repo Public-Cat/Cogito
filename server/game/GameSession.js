@@ -85,6 +85,12 @@ export class GameSession {
     } else if (this.state === STATES.PLAYING || this.state === STATES.VOTING || this.state === STATES.VOTING_SOON) {
       player.isDisconnected = true;
       player.isActive = false;
+      if (this.state === STATES.PLAYING) {
+        const currentPlayer = this.turnOrder[this.currentTurnIndex];
+        if (currentPlayer && currentPlayer.id === player.id) {
+          this.advanceTurn();
+        }
+      }
     }
   }
 
