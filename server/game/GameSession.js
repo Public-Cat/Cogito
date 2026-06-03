@@ -374,7 +374,7 @@ export class GameSession {
       humanEliminated: humanEliminated ? { id: humanEliminated.id, name: humanEliminated.name, isHuman: humanEliminated.isHuman } : null,
     });
 
-    this.checkWinCondition();
+    setTimeout(() => this.checkWinCondition(), 3000);
   }
 
   checkWinCondition() {
