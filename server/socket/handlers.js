@@ -21,10 +21,12 @@ export function registerHandlers(io, socket) {
       const existingPlayer = session.getPlayerBySocket(socket.id);
       if (existingPlayer) {
         existingPlayer.name = sanitizedName;
+        console.log(`[HUMAN] Player "${sanitizedName}" updated name`);
       } else {
         const playerId = gameManager.generatePlayerId();
         const newPlayer = session.addPlayer(playerId, true, socket.id);
         newPlayer.name = sanitizedName;
+        console.log(`[HUMAN] Player "${sanitizedName}" joined lobby`);
       }
 
       session.assignHost();
@@ -149,6 +151,7 @@ export function registerHandlers(io, socket) {
         timestamp: Date.now(),
       };
       session.messages.push(message);
+      console.log(`[HUMAN] ${player.name} wrote: "${sanitizedText}"`);
       io.emit('game:newMessage', message);
 
       session.advanceTurn();
@@ -224,6 +227,7 @@ export function registerHandlers(io, socket) {
       player.socketId = socket.id;
       player.isDisconnected = false;
       player.isActive = true;
+      console.log(`[HUMAN] Player "${player.name}" reconnected`);
       if (currentSession.state === 'PLAYING') {
         const currentPlayer = currentSession.turnOrder[currentSession.currentTurnIndex];
         if (currentPlayer && currentPlayer.isDisconnected) {
@@ -241,6 +245,8 @@ export function registerHandlers(io, socket) {
     try {
       const currentSession = gameManager.getSession();
       if (currentSession) {
+        const disconnectedPlayer = currentSession.getPlayerBySocket(socket.id);
+        if (disconnectedPlayer) console.log(`[HUMAN] Player "${disconnectedPlayer.name}" disconnected`);
         currentSession.handleDisconnect(socket.id);
         const host = currentSession.getHost();
         if (host && host.socketId) {
