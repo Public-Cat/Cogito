@@ -35,6 +35,10 @@ function render() {
       <div id="voteTargets" style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;max-width:600px;"></div>
       <div id="voteWaiting" style="display:none;color:var(--color-text-dim);margin-top:24px;">> WAITING FOR VOTES...</div>
     </div>
+    <div id="eliminationOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.95);z-index:150;justify-content:center;align-items:center;flex-direction:column;">
+      <h2 style="color:var(--color-warning);margin-bottom:24px;">> ELIMINATION</h2>
+      <div id="eliminationContent" style="max-width:500px;width:100%;text-align:center;"></div>
+    </div>
     <div id="endOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.95);z-index:200;justify-content:center;align-items:center;flex-direction:column;">
       <h1 id="endTitle" style="font-size:3em;margin-bottom:24px;"></h1>
       <div id="endReveal" style="max-width:500px;width:100%;"></div>
@@ -84,6 +88,7 @@ function updateUI(state) {
   const turnIndicator = document.getElementById('turnIndicator');
 
   if (state.phase === 'PLAYING') {
+    document.getElementById('eliminationOverlay').style.display = 'none';
     input.disabled = !isMyTurn;
     sendBtn.disabled = !isMyTurn;
     if (isMyTurn) {
@@ -231,6 +236,25 @@ function showVotingOverlay() {
 
 function showVoteResult(result) {
   document.getElementById('votingOverlay').style.display = 'none';
+  const overlay = document.getElementById('eliminationOverlay');
+  const content = document.getElementById('eliminationContent');
+
+  const eliminated = [];
+  if (result.aiEliminated) eliminated.push(result.aiEliminated);
+  if (result.humanEliminated) eliminated.push(result.humanEliminated);
+
+  if (eliminated.length > 0) {
+    content.innerHTML = eliminated.map(p => `
+      <div style="margin:12px 0;padding:16px 24px;border:1px solid var(--color-danger);color:var(--color-danger);font-size:1.3em;text-align:center;box-shadow:0 0 8px var(--color-danger);">
+        > ${p.name} TERMINATED
+      </div>
+    `).join('');
+  } else {
+    content.innerHTML = '<p style="color:var(--color-text-dim);font-size:1.2em;">> NO ELIMINATION THIS ROUND</p>';
+  }
+
+  overlay.style.display = 'flex';
+
   const container = document.getElementById('messages');
   const div = document.createElement('div');
   div.style.margin = '8px 0';
@@ -238,14 +262,15 @@ function showVoteResult(result) {
   div.style.border = '1px solid var(--color-primary-dim)';
   div.innerHTML = `
     <div style="color:var(--color-warning);">> VOTE RESULT</div>
-    ${result.aiEliminated ? `<div>AI vote eliminated: ${result.aiEliminated.name} (${result.aiEliminated.isHuman ? 'HUMAN' : 'AI'})</div>` : '<div style="color:var(--color-text-dim);">AI vote: no elimination (tie)</div>'}
-    ${result.humanEliminated ? `<div>Human vote eliminated: ${result.humanEliminated.name} (${result.humanEliminated.isHuman ? 'HUMAN' : 'AI'})</div>` : '<div style="color:var(--color-text-dim);">Human vote: no elimination (tie)</div>'}
+    ${result.aiEliminated ? `<div>AI vote eliminated: ${result.aiEliminated.name}</div>` : '<div style="color:var(--color-text-dim);">AI vote: no elimination (tie)</div>'}
+    ${result.humanEliminated ? `<div>Human vote eliminated: ${result.humanEliminated.name}</div>` : '<div style="color:var(--color-text-dim);">Human vote: no elimination (tie)</div>'}
   `;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
 }
 
 function showEndScreen(data) {
+  document.getElementById('eliminationOverlay').style.display = 'none';
   document.getElementById('endOverlay').style.display = 'flex';
   const title = document.getElementById('endTitle');
   if (data.winner === 'humans') {
