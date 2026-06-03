@@ -49,7 +49,7 @@ export class GameSession {
   }
 
   getActiveHumans() {
-    return this.players.filter(p => p.isHuman && !p.isEliminated);
+    return this.players.filter(p => p.isHuman && !p.isEliminated && !p.isDisconnected);
   }
 
   getActiveAIs() {
