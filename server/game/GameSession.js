@@ -141,6 +141,7 @@ export class GameSession {
           { role: 'user', content: buildNamePrompt() },
         ]);
         let name = nameResponse.trim().split('\n')[0].trim();
+        if (!name || name === '...') throw new Error('invalid name');
         const existingNames = this.players.filter(p => p !== aiPlayer).map(p => p.name.toLowerCase());
         let attempt = 0;
         while (existingNames.includes(name.toLowerCase()) && attempt < 10) {
@@ -148,6 +149,7 @@ export class GameSession {
             { role: 'user', content: buildNamePrompt() },
           ]);
           name = retryResponse.trim().split('\n')[0].trim();
+          if (!name || name === '...') throw new Error('invalid name');
           attempt++;
         }
         aiPlayer.name = name;
