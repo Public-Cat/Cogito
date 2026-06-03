@@ -10,5 +10,6 @@ export class Player {
     this.isHost = false;
     this.model = null;
     this.messageHistory = null;
+    this.lastMessageIndex = 0;
   }
 }
