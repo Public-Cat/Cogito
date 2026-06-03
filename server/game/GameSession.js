@@ -153,8 +153,10 @@ export class GameSession {
           attempt++;
         }
         aiPlayer.name = name;
+        console.log(`[AI] ${aiPlayer.name} (${aiPlayer.model}) chose name`);
       } catch {
         aiPlayer.name = `AI-${Math.random().toString(36).slice(2, 6)}`;
+        console.log(`[AI] ${aiPlayer.model} using fallback name "${aiPlayer.name}"`);
       }
       aiPlayer.messageHistory = [
         { role: 'system', content: buildSystemPrompt(aiPlayer.name, this.topic, this.players.map(p => p.name)) },
@@ -167,6 +169,7 @@ export class GameSession {
     this.currentTurnIndex = 0;
     this.round = 0;
     this.state = STATES.PLAYING;
+    console.log(`[GAME] Game started | Topic: "${this.topic}" | Players: [${this.players.map(p => p.name).join(', ')}]`);
   }
 
   async handleTurn() {
@@ -195,6 +198,7 @@ export class GameSession {
       const reply = await chat(currentPlayer.model, currentPlayer.messageHistory);
       if (this.state !== STATES.PLAYING) return;
       currentPlayer.messageHistory.push({ role: 'assistant', content: reply });
+      console.log(`[AI] ${currentPlayer.name} wrote: "${reply}"`);
       const message = {
         playerId: currentPlayer.id,
         playerName: currentPlayer.name,
@@ -222,8 +226,10 @@ export class GameSession {
       if (this.currentTurnIndex >= this.turnOrder.length) {
         this.currentTurnIndex = 0;
         this.round++;
+        console.log(`[GAME] Round ${this.round} started`);
         if (this.round >= 2) {
           this.state = STATES.VOTING_SOON;
+          console.log(`[GAME] Round ${this.round} — voting starts in 5s`);
           this.emitToAll('game:votingSoon', { delay: 5 });
           this.emitGameState();
           setTimeout(() => this.startVoting(), 5000);
@@ -245,6 +251,7 @@ export class GameSession {
   startVoting() {
     if (this.state !== STATES.VOTING_SOON) return;
     this.state = STATES.VOTING;
+    console.log(`[GAME] Voting started (Round ${this.round})`);
     this.humanVotes = new Map();
     this.aiVotes = new Map();
     this.voteTimeout = null;
@@ -254,6 +261,7 @@ export class GameSession {
     this.emitGameState();
     this.collectAIVotes();
     this.voteTimeout = setTimeout(() => {
+      console.log(`[GAME] Voting timeout reached — forcing resolution`);
       this.humanVotesResolved = true;
       this.aiVotesResolved = true;
       this.tryResolveVotes();
@@ -277,6 +285,9 @@ export class GameSession {
           .find(p => voteResponse.toLowerCase().includes(p.name.toLowerCase()));
         if (voteTarget) {
           this.aiVotes.set(ai.id, voteTarget.id);
+          console.log(`[AI] ${ai.name} voted for "${voteTarget.name}"`);
+        } else {
+          console.log(`[AI] ${ai.name} vote: could not parse target from "${voteResponse}"`);
         }
       } catch (err) {
         console.error(`AI vote failed for ${ai.name}:`, err.message);
@@ -289,6 +300,9 @@ export class GameSession {
   }
 
   submitHumanVote(voterId, targetId) {
+    const voter = this.getPlayer(voterId);
+    const target = this.getPlayer(targetId);
+    console.log(`[HUMAN] ${voter ? voter.name : voterId} voted for "${target ? target.name : targetId}"`);
     this.humanVotes.set(voterId, targetId);
     if (this.humanVotes.size >= this.getActiveHumans().length) {
       this.humanVotesResolved = true;
@@ -324,23 +338,36 @@ export class GameSession {
     let humanEliminated = null;
 
     const maxAiVotes = Math.max(...aiVoteCounts.values(), 0);
+    const maxHumanVotes = Math.max(...humanVoteCounts.values(), 0);
+
     if (maxAiVotes > 0) {
       const aiTargets = [...aiVoteCounts.entries()].filter(([, c]) => c === maxAiVotes);
       if (aiTargets.length === 1) {
         aiEliminated = this.getPlayer(aiTargets[0][0]);
+      } else {
+        const tiedNames = aiTargets.map(([id]) => this.getPlayer(id)?.name).join(', ');
+        console.log(`[GAME] No AI eliminated (tie: ${tiedNames})`);
       }
     }
 
-    const maxHumanVotes = Math.max(...humanVoteCounts.values(), 0);
     if (maxHumanVotes > 0) {
       const humanTargets = [...humanVoteCounts.entries()].filter(([, c]) => c === maxHumanVotes);
       if (humanTargets.length === 1) {
         humanEliminated = this.getPlayer(humanTargets[0][0]);
+      } else {
+        const tiedNames = humanTargets.map(([id]) => this.getPlayer(id)?.name).join(', ');
+        console.log(`[GAME] No human eliminated (tie: ${tiedNames})`);
       }
     }
 
-    if (aiEliminated) aiEliminated.isEliminated = true;
-    if (humanEliminated) humanEliminated.isEliminated = true;
+    if (aiEliminated) {
+      aiEliminated.isEliminated = true;
+      console.log(`[GAME] "${aiEliminated.name}" eliminated (AI votes: ${maxAiVotes})`);
+    }
+    if (humanEliminated) {
+      humanEliminated.isEliminated = true;
+      console.log(`[GAME] "${humanEliminated.name}" eliminated (Human votes: ${maxHumanVotes})`);
+    }
 
     this.emitToAll('game:voteResult', {
       aiEliminated: aiEliminated ? { id: aiEliminated.id, name: aiEliminated.name, isHuman: aiEliminated.isHuman } : null,
@@ -360,6 +387,7 @@ export class GameSession {
       this.endGame('humans');
     } else {
       this.state = STATES.PLAYING;
+      console.log(`[GAME] No winner yet — continuing (Humans: ${aliveHumans.length}, AIs: ${aliveAIs.length})`);
       while (this.currentTurnIndex < this.turnOrder.length) {
         const p = this.turnOrder[this.currentTurnIndex];
         if (p && !p.isEliminated && !p.isDisconnected) break;
@@ -378,6 +406,7 @@ export class GameSession {
 
   endGame(winner) {
     this.state = STATES.ENDED;
+    console.log(`[GAME] Game ended — ${winner || this.determineWinner()} win!`);
     if (this.voteTimeout) {
       clearTimeout(this.voteTimeout);
       this.voteTimeout = null;
