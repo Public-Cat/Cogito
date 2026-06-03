@@ -280,6 +280,7 @@ export class GameSession {
         const voteResponse = await chat(ai.model, ai.messageHistory);
         ai.messageHistory.push({ role: 'assistant', content: voteResponse });
         const voteTarget = activePlayers
+          .filter(p => p.id !== ai.id)
           .slice()
           .sort((a, b) => b.name.length - a.name.length)
           .find(p => voteResponse.toLowerCase().includes(p.name.toLowerCase()));

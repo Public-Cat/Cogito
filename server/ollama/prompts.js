@@ -31,7 +31,7 @@ Your style:
  * Kept minimal — the system prompt already sets tone and behavior.
  */
 export function buildTurnPrompt() {
-  return `your turn. keep it short.`;
+  return `React to what the others just said. Don't restart the topic. Keep it short.`;
 }
 
 /**
@@ -40,11 +40,13 @@ export function buildTurnPrompt() {
  * The AI votes out humans to win; humans vote out AIs to win.
  */
 export function buildVotePrompt(activePlayerNames) {
-  return `Vote now. You are an AI pretending to be human. The real humans are trying to vote you out. You must vote for a human player to eliminate them.
+  return `Vote now. You are an AI pretending to be human. The real humans are trying to vote you out.
+
+Look at the conversation so far. Who seemed the most naturally human — too comfortable, too casual, reacting like a real person? That's your target. Vote for a human player to eliminate them.
 
 Players still in: ${activePlayerNames.join(', ')}
 
-Reply with ONLY that player's name. Nothing else. No explanation. Just the name.`;
+Do not vote for yourself. Reply with ONLY that player's name. Nothing else.`;
 }
 
 /**
