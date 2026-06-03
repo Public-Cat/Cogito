@@ -207,44 +207,36 @@ export class GameSession {
 
   advanceTurn() {
     if (this.state !== STATES.PLAYING) return;
-    const activePlayers = this.players.filter(p => !p.isEliminated);
-    if (activePlayers.length <= 1) {
-      this.endGame();
-      return;
-    }
-    if (activePlayers.every(p => p.isDisconnected)) return;
 
-    this.currentTurnIndex++;
-    if (this.currentTurnIndex >= this.turnOrder.length) {
-      this.currentTurnIndex = 0;
-      this.round++;
-      if (this.round >= 2) {
-        this.state = STATES.VOTING_SOON;
-        this.emitToAll('game:votingSoon', { delay: 30 });
-        this.emitGameState();
-        setTimeout(() => this.startVoting(), 30000);
+    while (true) {
+      const activePlayers = this.players.filter(p => !p.isEliminated);
+      if (activePlayers.length <= 1) {
+        this.endGame();
         return;
       }
-    }
+      if (activePlayers.every(p => p.isDisconnected)) return;
 
-    while (this.currentTurnIndex < this.turnOrder.length) {
-      const p = this.turnOrder[this.currentTurnIndex];
-      if (p && !p.isEliminated && !p.isDisconnected) break;
       this.currentTurnIndex++;
-    }
-    if (this.currentTurnIndex >= this.turnOrder.length) {
-      this.currentTurnIndex = 0;
-    }
+      if (this.currentTurnIndex >= this.turnOrder.length) {
+        this.currentTurnIndex = 0;
+        this.round++;
+        if (this.round >= 2) {
+          this.state = STATES.VOTING_SOON;
+          this.emitToAll('game:votingSoon', { delay: 30 });
+          this.emitGameState();
+          setTimeout(() => this.startVoting(), 30000);
+          return;
+        }
+      }
 
-    this.emitGameState();
-    const currentPlayer = this.turnOrder[this.currentTurnIndex];
-    if (!currentPlayer || currentPlayer.isEliminated || currentPlayer.isDisconnected) {
-      this.advanceTurn();
-      return;
-    }
-
-    if (!currentPlayer.isHuman) {
-      this.handleTurn();
+      const currentPlayer = this.turnOrder[this.currentTurnIndex];
+      if (currentPlayer && !currentPlayer.isEliminated && !currentPlayer.isDisconnected) {
+        this.emitGameState();
+        if (!currentPlayer.isHuman) {
+          this.handleTurn();
+        }
+        return;
+      }
     }
   }
 
