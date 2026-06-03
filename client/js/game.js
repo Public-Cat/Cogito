@@ -193,7 +193,7 @@ function showVotingOverlay() {
   document.getElementById('voteWaiting').style.display = 'none';
 
   if (!gameState) return;
-  const activePlayers = gameState.players.filter(p => !p.isEliminated);
+    const activePlayers = gameState.players.filter(p => !p.isEliminated && !p.isDisconnected);
   const me = gameState.players.find(p => p.id === myId);
 
   if (me && me.isHuman && !me.isEliminated) {
