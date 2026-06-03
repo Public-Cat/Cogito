@@ -224,9 +224,9 @@ export class GameSession {
         this.round++;
         if (this.round >= 2) {
           this.state = STATES.VOTING_SOON;
-          this.emitToAll('game:votingSoon', { delay: 30 });
+          this.emitToAll('game:votingSoon', { delay: 5 });
           this.emitGameState();
-          setTimeout(() => this.startVoting(), 30000);
+          setTimeout(() => this.startVoting(), 5000);
           return;
         }
       }

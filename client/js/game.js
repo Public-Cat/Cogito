@@ -4,6 +4,8 @@ const socket = io();
 
 let myId = sessionStorage.getItem('cogito_myId') || null;
 let gameState = null;
+let voteSoonCountdown = null;
+let voteSoonInterval = null;
 
 const app = document.getElementById('app');
 
@@ -29,7 +31,7 @@ function render() {
     </div>
     <div id="votingOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.95);z-index:100;justify-content:center;align-items:center;flex-direction:column;">
       <h2 style="color:var(--color-warning);margin-bottom:24px;">> VOTING PHASE</h2>
-      <p id="voteTimer" style="color:var(--color-text-dim);margin-bottom:16px;">30</p>
+      <p id="voteTimer" style="color:var(--color-text-dim);margin-bottom:16px;">5</p>
       <div id="voteTargets" style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;max-width:600px;"></div>
       <div id="voteWaiting" style="display:none;color:var(--color-text-dim);margin-top:24px;">> WAITING FOR VOTES...</div>
     </div>
@@ -94,7 +96,8 @@ function updateUI(state) {
   } else if (state.phase === 'VOTING_SOON') {
     input.disabled = true;
     sendBtn.disabled = true;
-    turnIndicator.textContent = '> voting in 30s...';
+    const remaining = voteSoonCountdown !== null ? voteSoonCountdown : 5;
+    turnIndicator.textContent = `> voting in ${remaining}s...`;
   } else {
     input.disabled = true;
     sendBtn.disabled = true;
@@ -290,11 +293,29 @@ socket.on('game:votingSoon', ({ delay }) => {
   div.textContent = `> VOTING IN ${delay}s...`;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
+
+  if (voteSoonInterval) clearInterval(voteSoonInterval);
+  voteSoonCountdown = delay;
   const turnIndicator = document.getElementById('turnIndicator');
-  turnIndicator.textContent = `> voting in ${delay}s...`;
+  turnIndicator.textContent = `> voting in ${voteSoonCountdown}s...`;
+  voteSoonInterval = setInterval(() => {
+    voteSoonCountdown--;
+    if (voteSoonCountdown > 0) {
+      turnIndicator.textContent = `> voting in ${voteSoonCountdown}s...`;
+    } else {
+      turnIndicator.textContent = '> voting...';
+      clearInterval(voteSoonInterval);
+      voteSoonInterval = null;
+    }
+  }, 1000);
 });
 
 socket.on('game:voteStart', () => {
+  if (voteSoonInterval) {
+    clearInterval(voteSoonInterval);
+    voteSoonInterval = null;
+  }
+  voteSoonCountdown = null;
   playVote();
   showVotingOverlay();
 });
