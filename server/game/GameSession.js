@@ -20,7 +20,6 @@ export class GameSession {
     this.round = 0;
     this.turnOrder = [];
     this.currentTurnIndex = 0;
-    this.humanVotes = new Map();
     this.aiVotes = new Map();
     this.emitToAll = null;
     this.emitToSocket = null;
@@ -252,17 +251,14 @@ export class GameSession {
     if (this.state !== STATES.VOTING_SOON) return;
     this.state = STATES.VOTING;
     console.log(`[GAME] Voting started (Round ${this.round})`);
-    this.humanVotes = new Map();
     this.aiVotes = new Map();
     this.voteTimeout = null;
     this.aiVotesResolved = false;
-    this.humanVotesResolved = false;
     this.emitToAll('game:voteStart', { roundNumber: this.round });
     this.emitGameState();
     this.collectAIVotes();
     this.voteTimeout = setTimeout(() => {
       console.log(`[GAME] Voting timeout reached — forcing resolution`);
-      this.humanVotesResolved = true;
       this.aiVotesResolved = true;
       this.tryResolveVotes();
     }, 10000);
@@ -300,22 +296,9 @@ export class GameSession {
     this.tryResolveVotes();
   }
 
-  submitHumanVote(voterId, targetId) {
-    const voter = this.getPlayer(voterId);
-    const target = this.getPlayer(targetId);
-    console.log(`[HUMAN] ${voter ? voter.name : voterId} voted for "${target ? target.name : targetId}"`);
-    this.humanVotes.set(voterId, targetId);
-    if (this.humanVotes.size >= this.getActiveHumans().length) {
-      this.humanVotesResolved = true;
-      this.tryResolveVotes();
-    }
-  }
-
   tryResolveVotes() {
     if (this.state !== STATES.VOTING) return;
-    if (!this.aiVotesResolved || !this.humanVotesResolved) {
-      return;
-    }
+    if (!this.aiVotesResolved) return;
     if (this.voteTimeout) {
       clearTimeout(this.voteTimeout);
       this.voteTimeout = null;
@@ -324,55 +307,34 @@ export class GameSession {
   }
 
   resolveVotes() {
-    const activePlayers = this.getActivePlayers();
-    const aiVoteCounts = new Map();
-    const humanVoteCounts = new Map();
+    const voteCounts = new Map();
 
     for (const targetId of this.aiVotes.values()) {
-      aiVoteCounts.set(targetId, (aiVoteCounts.get(targetId) || 0) + 1);
-    }
-    for (const targetId of this.humanVotes.values()) {
-      humanVoteCounts.set(targetId, (humanVoteCounts.get(targetId) || 0) + 1);
+      voteCounts.set(targetId, (voteCounts.get(targetId) || 0) + 1);
     }
 
-    let aiEliminated = null;
-    let humanEliminated = null;
+    let eliminated = null;
 
-    const maxAiVotes = Math.max(...aiVoteCounts.values(), 0);
-    const maxHumanVotes = Math.max(...humanVoteCounts.values(), 0);
+    const maxVotes = Math.max(...voteCounts.values(), 0);
 
-    if (maxAiVotes > 0) {
-      const aiTargets = [...aiVoteCounts.entries()].filter(([, c]) => c === maxAiVotes);
-      if (aiTargets.length === 1) {
-        aiEliminated = this.getPlayer(aiTargets[0][0]);
+    if (maxVotes > 0) {
+      const targets = [...voteCounts.entries()].filter(([, c]) => c === maxVotes);
+      if (targets.length === 1) {
+        eliminated = this.getPlayer(targets[0][0]);
       } else {
-        const tiedNames = aiTargets.map(([id]) => this.getPlayer(id)?.name).join(', ');
-        console.log(`[GAME] No AI eliminated (tie: ${tiedNames})`);
+        const tiedNames = targets.map(([id]) => this.getPlayer(id)?.name).join(', ');
+        console.log(`[GAME] No elimination (tie: ${tiedNames})`);
       }
     }
 
-    if (maxHumanVotes > 0) {
-      const humanTargets = [...humanVoteCounts.entries()].filter(([, c]) => c === maxHumanVotes);
-      if (humanTargets.length === 1) {
-        humanEliminated = this.getPlayer(humanTargets[0][0]);
-      } else {
-        const tiedNames = humanTargets.map(([id]) => this.getPlayer(id)?.name).join(', ');
-        console.log(`[GAME] No human eliminated (tie: ${tiedNames})`);
-      }
-    }
-
-    if (aiEliminated) {
-      aiEliminated.isEliminated = true;
-      console.log(`[GAME] "${aiEliminated.name}" eliminated (AI votes: ${maxAiVotes})`);
-    }
-    if (humanEliminated) {
-      humanEliminated.isEliminated = true;
-      console.log(`[GAME] "${humanEliminated.name}" eliminated (Human votes: ${maxHumanVotes})`);
+    if (eliminated) {
+      eliminated.isEliminated = true;
+      const type = eliminated.isHuman ? 'human' : 'AI';
+      console.log(`[GAME] "${eliminated.name}" eliminated (${type}, votes: ${maxVotes})`);
     }
 
     this.emitToAll('game:voteResult', {
-      aiEliminated: aiEliminated ? { id: aiEliminated.id, name: aiEliminated.name, isHuman: aiEliminated.isHuman } : null,
-      humanEliminated: humanEliminated ? { id: humanEliminated.id, name: humanEliminated.name, isHuman: humanEliminated.isHuman } : null,
+      eliminated: eliminated ? { id: eliminated.id, name: eliminated.name, isHuman: eliminated.isHuman } : null,
     });
 
     setTimeout(() => this.checkWinCondition(), 3000);

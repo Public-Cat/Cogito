@@ -161,37 +161,6 @@ export function registerHandlers(io, socket) {
     }
   });
 
-  socket.on('game:vote', ({ targetId } = {}) => {
-    try {
-      const session = gameManager.getSession();
-      if (!session) {
-        socket.emit('error', { message: 'No active game session.' });
-        return;
-      }
-      const player = session.getPlayerBySocket(socket.id);
-      if (!player) {
-        socket.emit('error', { message: 'Player not found.' });
-        return;
-      }
-
-      if (session.state !== 'VOTING') {
-        socket.emit('error', { message: 'Not in voting phase.' });
-        return;
-      }
-
-      const target = session.getPlayer(targetId);
-      if (!target || target.isEliminated || target.isDisconnected) {
-        socket.emit('error', { message: 'Invalid vote target.' });
-        return;
-      }
-
-      session.submitHumanVote(player.id, targetId);
-    } catch (err) {
-      console.error('game:vote error:', err);
-      socket.emit('error', { message: 'Failed to submit vote.' });
-    }
-  });
-
   socket.on('lobby:reset', () => {
     try {
       gameManager.reset();

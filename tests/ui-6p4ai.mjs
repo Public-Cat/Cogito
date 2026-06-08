@@ -282,17 +282,10 @@ async function run() {
       );
       console.log('  Voting overlay visible');
 
-      // Have each non-eliminated human vote for the first non-self target
-      for (let i = 0; i < NUM_HUMANS; i++) {
-        const btns = await pages[i].$$('#voteTargets button');
-        if (btns.length === 0) continue;
-        const text = await btns[0].textContent();
-        const targetName = text ? text.replace('> VOTE ', '').trim() : '';
-        // Use text-based click which handles visibility better
-        await pages[i].click(`text=${targetName}`, { timeout: 5000, force: true }).catch(() => {});
-        await sleep(200);
-      }
-      console.log(`  All ${NUM_HUMANS} humans voted`);
+      // Verify spectator mode — no vote buttons, AI voting message
+      const spectatorMsg = await pages[0].textContent('#voteTargets');
+      console.assert(spectatorMsg.includes('AI players are voting'), 'Should show AI voting message');
+      console.log('  Humans are spectators during AI vote');
 
       // Wait for vote resolution
       await sleep(3000);

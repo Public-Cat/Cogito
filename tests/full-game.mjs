@@ -2,21 +2,21 @@ import { io } from "socket.io-client";
 
 const BASE = "http://192.168.1.32:3000";
 
-function waitForState(socket) {
-  return new Promise(r => socket.once("game:state", r));
-}
-
-function waitForVoteResult(socket) {
-  return new Promise(r => socket.once("game:voteResult", r));
-}
-
-function waitForEnded(socket) {
-  return new Promise(r => socket.once("game:ended", r));
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
 }
 
 async function main() {
   console.log("=== Full Game Flow Test: Voting + End ===\n");
   const t = (msg) => console.log("  [" + (Date.now() % 100000) + "] " + msg);
+
+  // 0. Reset any stale session
+  t("Resetting stale session...");
+  const resetSocket = io(BASE);
+  await new Promise(r => resetSocket.on("connect", r));
+  resetSocket.emit("lobby:reset");
+  await sleep(500);
+  resetSocket.disconnect();
 
   // 1. Join as 2 humans
   t("Joining Player A (host)...");
@@ -40,100 +40,97 @@ async function main() {
   t("Bob joined, myId=" + bobId + ", isHost=" + lb.isHost);
   if (lb.isHost) throw new Error("FAIL: Bob should not be host");
 
-  // 2. Start game — set up listener BEFORE emitting
+  // 2. Start game
   t("Starting game with 1 AI (qwen2.5:7b)...");
-  const gsAPromise = waitForState(sA);
-  await new Promise(r => sA.emit("lobby:start", {
+  const gsAPromise = new Promise(r => sA.once("game:state", r));
+  const gsBPromise = new Promise(r => sB.once("game:state", r));
+  sA.emit("lobby:start", {
     topic: "Is pineapple on pizza acceptable?",
     aiPlayers: [{ model: "qwen2.5:7b" }],
-  }, r));
+  });
 
-  let state = await gsAPromise;
+  let state = await Promise.race([
+    gsAPromise,
+    sleep(60000).then(() => { throw new Error("Timeout game:state"); }),
+  ]);
+  await gsBPromise.catch(() => {});
+
   t("Game started: phase=" + state.phase + ", players=" + state.players.length +
     " (H:" + state.players.filter(p => p.isHuman).length +
     " AI:" + state.players.filter(p => !p.isHuman).length + ")");
   if (state.phase !== "PLAYING") throw new Error("FAIL: Phase should be PLAYING");
 
-  // 3. Play through all turns until voting
-  // Use a persistent voteStart flag instead of Promise.race to avoid missing game:state
-  let voteStarted = false;
-  sA.on("game:voteStart", () => { voteStarted = true; });
+  // 3. Set up persistent listeners
+  let pendingEndData = null;
+  sA.on("game:ended", (data) => { pendingEndData = data; });
 
-  let turnCount = 0;
-  const maxTurns = 20;
+  // We drive the game via game:state changes.
+  // To avoid races, we chain: set up listener → take action → await listener.
+  // For AI turns, we simply wait for the next game:state (the AI auto-advances).
 
-  while (state.phase === "PLAYING" && turnCount < maxTurns) {
-    turnCount++;
+  let voteCount = 0;
+
+  while (!pendingEndData) {
+    // Determine what to do based on current state
     const current = state.players.find(p => p.id === state.currentTurn);
-    t("Turn " + turnCount + ": " + current.name + " (human=" + current.isHuman + ", round=" + state.round + ")");
 
-    const statePromise = waitForState(sA);
-
-    if (current.isHuman) {
+    if (state.phase === "PLAYING" && current && current.isHuman) {
+      t("Turn: " + current.name + " (human, round " + state.round + ")");
+      // Set up listener for the state change our message will trigger
+      const nextState = new Promise(r => sA.once("game:state", r));
       const sender = current.id === aliceId ? sA : sB;
       sender.emit("game:sendMessage", {
-        text: current.name + "'s thought on pineapple pizza: it's a controversial topic with valid points on both sides.",
+        text: current.name + "'s thought: discussing the topic casually.",
       });
+      state = await nextState;
+      continue;
     }
 
-    state = await statePromise;
+    // For AI turns, VOTING_SOON, VOTING, or after-vote transitions:
+    // Just wait for the next game:state
+    const nextState = new Promise(r => sA.once("game:state", r));
 
-    if (voteStarted) {
-      t("Voting phase triggered!");
-      break;
+    if (state.phase === "VOTING") {
+      // Wait for vote result
+      const vrPromise = new Promise(r => sA.once("game:voteResult", r));
+      const result = await vrPromise;
+      voteCount++;
+      t("Vote round " + voteCount + ": eliminated=" + (result.eliminated
+        ? result.eliminated.name + " (" + (result.eliminated.isHuman ? "human" : "AI") + ")"
+        : "none"));
+      // After vote result, game transitions (3s delay + checkWinCondition).
+      // It may emit game:state (PLAYING) or game:ended (game over).
+      // Race both to avoid hanging.
+      const afterVote = await Promise.race([
+        nextState.then(s => ({ type: "state", state: s })),
+        sleep(15000).then(() => ({ type: "timeout" })),
+      ]);
+      if (afterVote.type === "state") {
+        state = afterVote.state;
+      }
+      continue;
     }
 
-    // VOTING_SOON means the game is waiting 5s before voting
     if (state.phase === "VOTING_SOON") {
-      t("Voting will start in 5s (VOTING_SOON)...");
+      state = await nextState;
+      continue;
     }
+
+    // PLAYING + AI turn (or PLAYING + no current found)
+    // AI will auto-advance; wait for the state change
+    if (current) {
+      t("Waiting for " + current.name + " (AI, round " + state.round + ")...");
+    }
+    state = await nextState;
   }
 
-  sA.removeListener("game:voteStart");
-
-  // Wait for voteStart if not yet received (VOTING_SOON phase with 30s delay)
-  if (!voteStarted) {
-    t("Waiting for voteStart event...");
-    await new Promise(r => sA.once("game:voteStart", r));
-    t("Vote started!");
-    state = await waitForState(sA);
-  }
-
-  if (!state || state.phase !== "VOTING") {
-    throw new Error("FAIL: Expected VOTING phase, got " + (state ? state.phase : "null"));
-  }
-
-  t("In voting phase at round " + state.round + ", " + state.players.filter(p => !p.isEliminated).length + " active players");
-
-  // 4. Submit votes — both humans vote for the AI player
-  const aiPlayer = state.players.find(p => !p.isHuman);
-  if (!aiPlayer) throw new Error("FAIL: No AI player found");
-  t("AI player: " + aiPlayer.name + " (" + aiPlayer.id + ")");
-
-  const voteResultPromise = waitForVoteResult(sA);
-
-  sA.emit("game:vote", { targetId: aiPlayer.id });
-  t("Alice voted for " + aiPlayer.name);
-  await new Promise(r => setTimeout(r, 200));
-
-  sB.emit("game:vote", { targetId: aiPlayer.id });
-  t("Bob voted for " + aiPlayer.name);
-
-  // 5. Wait for vote result
-  const voteResult = await voteResultPromise;
-  t("Vote result: AI eliminated=" + (voteResult.aiEliminated ? voteResult.aiEliminated.name : "none") +
-    ", Human eliminated=" + (voteResult.humanEliminated ? voteResult.humanEliminated.name : "none"));
-
-  // 6. Wait for game end
-  const endData = await waitForEnded(sA);
-  t("Game ended! Winner: " + endData.winner);
-  endData.players.forEach(p => {
-    t("  " + p.name + " — " + (p.isHuman ? "HUMAN" : "AI (" + (p.model || "?") + ")") + (p.isEliminated ? " [ELIMINATED]" : ""));
+  t("Game ended after " + voteCount + " vote round(s)! Winner: " + pendingEndData.winner);
+  pendingEndData.players.forEach(p => {
+    t("  " + p.name + " — " + (p.isHuman ? "HUMAN" : "AI (" + (p.model || "?") + ")") +
+      (p.isEliminated ? " [ELIMINATED]" : ""));
   });
 
-  if (endData.winner !== "humans") throw new Error("FAIL: Humans should win");
-
-  // Cleanup: wait for server to acknowledge reset before closing
+  // Cleanup
   await new Promise(r => {
     sA.emit("game:returnToLobby");
     sA.once("lobby:state", r);
