@@ -269,54 +269,17 @@ async function run() {
       );
       console.log('  Voting overlay visible on A');
 
-      // Verify vote timer
+      // Verify spectator mode shows AI voting message
       const voteTimer = await pageA.textContent('#voteTimer');
       console.log(`  Vote timer: ${voteTimer}s`);
 
-      // Verify vote targets appear
       await sleep(1000);
-      const voteButtons = await pageA.$$('#voteTargets button');
-      console.log(`  Vote buttons on A: ${voteButtons.length}`);
-      console.assert(voteButtons.length >= 1, 'Should have vote buttons for active players');
+      const spectatorMsg = await pageA.textContent('#voteTargets');
+      console.log(`  Spectator message: ${spectatorMsg}`);
+      console.assert(spectatorMsg.includes('AI players are voting'), 'Should show AI voting message');
 
-      // Both humans vote for the AI player (the name that appears on both
-      // players' vote buttons but isn't either human) to force elimination
-      const aVoteTexts = await Promise.all(voteButtons.map(b => b.textContent()));
-      console.log(`  A's vote options: ${aVoteTexts.join(', ')}`);
-
-      // Find the non-Alice, non-Bob name from A's vote options
-      const aiName = aVoteTexts
-        .map(t => t.replace('> VOTE ', '').trim())
-        .find(n => n !== 'Alice' && n !== 'Bob');
-
-      for (const btn of voteButtons) {
-        const text = await btn.textContent();
-        if (text && aiName && text.includes(aiName)) {
-          await btn.click();
-          console.log(`  Player A voted: ${text}`);
-          break;
-        }
-      }
-
-      // Verify waiting message appears after voting
-      await sleep(500);
-      const voteWaiting = await pageA.textContent('#voteWaiting');
-      console.log(`  After A vote: ${voteWaiting}`);
-
-      // Player B votes for the same AI
-      await sleep(1000);
-      const voteButtonsB = await pageB.$$('#voteTargets button');
-      console.log(`  Vote buttons on B: ${voteButtonsB.length}`);
-      for (const btn of voteButtonsB) {
-        const text = await btn.textContent();
-        if (text && aiName && text.includes(aiName)) {
-          await btn.click();
-          console.log(`  Player B voted: ${text}`);
-          break;
-        }
-      }
-
-      console.log('  Both players voted');
+      // Humans are spectators — no vote buttons to click
+      console.log('  Humans are spectators during AI vote');
     } else {
       console.log(`  Skipping voting (already in ${finalPhase})`);
     }

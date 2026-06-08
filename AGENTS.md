@@ -1,95 +1,91 @@
 # Cogito — Agent Guide
 
-## Workflow rules
-- **Never leave this directory.** The workspace root is `/home/agents/cogito`. Use `./tmp` instead of `/tmp` for temporary files.
-- **Always start new changes in a distinct feature branch.** Branch from `main`.
-- **Use git worktrees for parallel feature work.** Create each feature branch worktree in `./worktrees/<branch-name>` by running:
-  `git worktree add -b <branch-name> ./worktrees/<branch-name> main`
-- **Commit often, commit early, commit atomically.** Follow Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`).
+## Workflow
+- **Never leave workspace root.** Use `./tmp` for temp files.
+- **All features branch from `develop`** and merge back to `develop`. Never touch `main`.
+- Use git worktrees for parallel features:
+  `git worktree add -b <branch-name> ./worktrees/<branch-name> develop`
+- `worktrees/` is in `.gitignore` — created and managed by agents.
+- **Conventional Commits** (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`).
 
 ## Stack
-- **Runtime**: Node.js v20+, ES Modules (`"type": "module"` in package.json). No `.cjs`/`.mjs` — all `.js` files use `import`/`export`.
-- **Backend**: Express + Socket.IO. No other backend framework.
-- **Frontend**: Vanilla HTML/CSS/JS served as static files by Express. No build tools, no bundler, no framework.
-- **No TypeScript anywhere. No database. No ORM.** All game state lives in memory.
+- **Runtime**: Node.js v20+, ES Modules (`"type": "module"`). No `.cjs`/`.mjs`.
+- **Backend**: Express + Socket.IO. No other framework.
+- **Frontend**: Vanilla HTML/CSS/JS in `client/`, served as static files. No build tools, bundlers, or frameworks.
+- **No TypeScript, no database, no ORM.** All game state in memory.
 
 ## Commands
 | Command | What |
 |---|---|
 | `npm start` | `node server/index.js` |
-| `npm run dev` | `node --watch server/index.js` (auto-restart on change) |
-| `node tests/e2e.mjs` | Run a socket-level E2E test (no test framework — plain Node) |
+| `npm run dev` | `node --watch server/index.js` |
+| `node tests/e2e.mjs` | Socket-level E2E |
 | `node tests/full-game.mjs` | Full game flow through voting + end |
-| `node tests/rejoin.mjs` | Tests player reconnection mid-game |
-| `node tests/ui-interactive.mjs` | Playwright-based full UI test (2 humans + 1 AI) |
-| `node tests/ui-6p4ai.mjs` | Playwright test (6 humans + 4 AIs, 2 vote rounds) |
+| `node tests/rejoin.mjs` | Player reconnection mid-game |
+| `node tests/ui-interactive.mjs` | Playwright UI test (2 humans + 1 AI) |
+| `node tests/ui-6p4ai.mjs` | Playwright UI test (6 humans + 4 AIs) |
 | `docker compose up --build` | Production build + run |
 | **No lint/typecheck/build scripts exist.** |
 
+All tests are plain Node scripts (no framework), exit via `process.exit(0|1)`.
+
 ## Test prerequisites
-- A running game server (e.g. `npm run dev` or Docker) at `http://192.168.1.32:3000`
-- Ollama accessible with at least one model pulled (default: `http://192.168.1.30:11434`)
-- All test scripts hardcode `192.168.1.32:3000` as the server URL
-- `ui-interactive.mjs` and `ui-6p4ai.mjs` require `npm install` (devDependencies include `playwright` and `socket.io-client`)
-- Playwright tests expect `qwen2.5:7b` as the AI model name
-- There is no test watcher/runner — tests are run directly with `node`
-- After each test run, the server session is dirty; tests emit `lobby:reset` or `game:returnToLobby` to clean up
+- Server running at `http://192.168.1.32:3000` (`npm run dev` or Docker)
+- Ollama at `http://192.168.1.30:11434` with `qwen2.5:7b` pulled
+- Playwright tests need `npm install` (devDeps: `playwright`, `socket.io-client`)
+- Server session is dirty after each test; clean up with `lobby:reset` or `game:returnToLobby`
 
-## Ollama configuration
-- Default URL in code: `http://192.168.1.30:11434` (not `host.docker.internal`; configured via `OLLAMA_BASE_URL` env var)
-- In Docker, `docker-compose.yml` uses `extra_hosts: ["host.docker.internal:host-gateway"]` — but the compose file currently points to a hardcoded IP instead
-- Model list is polled every 30s server-side; cached in `OllamaClient.js`
-- Chat timeout: 30s; model list timeout: 5s
-- On Ollama failure, returns fallback `"..."`, does not crash the game
-
-## Architecture
-
-### Game state machine
+## Game state machine
 `LOBBY → PLAYING → VOTING_SOON (5s) → VOTING (10s timeout) → PLAYING (loop) → ENDED`
 
-### Key files
+Minimum **2 humans + 1 AI** to start. Voting starts after round 2, then every round.
+Human votes visible to all humans; AI votes are private.
+
+## Key files
 | File | Role |
 |---|---|
-| `server/index.js` | Express app, Socket.IO init, static file serving, `/api/models` endpoint |
-| `server/game/GameManager.js` | Singleton session holder — `currentSession`, `reset()`, `generatePlayerId()` |
-| `server/game/GameSession.js` | Full game state machine, turn logic, vote resolution, win conditions |
-| `server/game/Player.js` | Player model |
+| `server/index.js` | Express app, Socket.IO init, static files, `/api/models` |
+| `server/game/GameManager.js` | Singleton — `getOrCreateSession()`, `reset()`, `generatePlayerId()` |
+| `server/game/GameSession.js` | State machine, turn logic, vote resolution, win conditions |
+| `server/game/Player.js` | Player model (isHuman, isEliminated, isDisconnected, messageHistory[]) |
+| `server/game/topics.js` | Array of ~15 discussion topics |
 | `server/ollama/OllamaClient.js` | HTTP wrapper for Ollama `/api/chat` and `/api/tags` |
-| `server/ollama/prompts.js` | `buildSystemPrompt`, `buildTurnPrompt`, `buildVotePrompt`, `buildNamePrompt` |
+| `server/ollama/prompts.js` | All AI prompts — never inline |
 | `server/socket/handlers.js` | All Socket.IO event handlers |
+| `client/js/matrixRain.js` | Self-installing canvas rain background |
+| `client/js/sfx.js` | Programmatic sounds (Web Audio API, no audio files) |
 
-### Socket events (see `DEVELOPMENT.md` for the full table)
-Client→Server: `lobby:setName`, `lobby:start`, `game:sendMessage`, `game:vote`, `game:returnToLobby`, `lobby:reset`, `game:rejoin`
-Server→Client: `lobby:state`, `host:assigned`, `game:state`, `game:newMessage`, `game:voteStart`, `game:voteResult`, `game:ended`, `error`, `game:votingSoon`
+## Socket events
+**Client→Server:**
+- `lobby:setName({ name })` — join or rename
+- `lobby:start({ topic, aiPlayers })` — host starts game (`aiPlayers: [{ model }]`)
+- `game:sendMessage({ text })` — submit turn message
+- `game:vote({ targetId })` — human player votes
+- `game:returnToLobby` — return after end screen
+- `lobby:reset` — force server reset
+- `game:rejoin({ playerId })` — reconnect mid-game
 
-### Socket event payload validation
-- Player names: `/^[a-zA-Z0-9 ]{1,20}$/`, sanitized for HTML (`<>&"'` stripped)
-- Messages: max 500 characters, sanitized
-- All event handlers wrapped in try/catch, emit `error` on failure
+**Server→Client:**
+- `lobby:state`, `host:assigned`, `game:state`, `game:newMessage`, `game:votingSoon`, `game:voteStart`, `game:voteResult`, `game:ended`, `error`
 
-### AI memory management
-- Each AI player has `messageHistory[]` on its `Player` instance
-- Round transcripts appended as single `user` entry per round, not per-message
-- `lastMessageIndex` prevents re-sending old messages on each turn (avoids quadratic growth)
-- Voting prompt appended to existing history, not rebuilt from scratch
+Full `game:state` emitted after every state transition (for reconnection support).
 
-### Disconnect handling
-- **In lobby**: player removed; host reassigned if needed
-- **During game**: marked `isDisconnected`, turn auto-advances if it was their turn; `game:rejoin` reconnects them via `playerId`
-- Rejoining mid-game sets `isDisconnected=false`, emits full `game:state`
+## Key conventions
+- **Validation**: Player names `/^[a-zA-Z0-9 ]{1,20}$/`, messages ≤500 chars, both HTML-sanitized. All handlers wrapped in try/catch.
+- **Game state** lives only in `GameSession.js` — never in socket handlers.
+- **All prompts** in `server/ollama/prompts.js` — never inline.
+- **AI memory**: `messageHistory[]` per AI player, round transcripts as single `user` entry, `lastMessageIndex` prevents resends.
+- **AI vote parsing**: Fuzzy case-insensitive `includes()` match against player names, sorted longest-first to avoid partial-name collisions.
+- **Disconnect**: lobby → removed + host reassigned. Mid-game → `isDisconnected`, turn auto-advances. Rejoin via `game:rejoin({ playerId })`.
+- **`isDisconnected`** players are skipped in turn order (treated like eliminated).
 
-## Docker notes
-- `Dockerfile`: `node:20-alpine`, `npm ci --omit=dev` (devDependencies excluded)
-- `docker-compose.yml` currently binds `192.168.1.32:3000:3000` (specific IP, not `0.0.0.0`)
-- `cap_drop: ALL` and `no-new-privileges:true` for security
-- Uses a custom Docker network (`cogito-net`, bridge)
+## Ollama
+- Default URL: `http://192.168.1.30:11434` (configurable via `OLLAMA_BASE_URL`)
+- Model list polled every 30s, cached. Timeouts: chat 30s, model list 5s.
+- On failure, returns `"..."` — does not crash.
+
+## Docker
+- `node:20-alpine`, `npm ci --omit=dev`, `EXPOSE 3000`
+- Binds `192.168.1.32:3000:3000` (specific IP), custom bridge `cogito-net`
+- Security: `cap_drop: ALL`, `no-new-privileges:true`
 - `.dockerignore` excludes `node_modules/`, `.git/`, `tmp/`, `*.md`
-
-## Conventions
-- No TypeScript. Plain JS ES modules with `import`/`export`.
-- No frontend build tools. No CSS frameworks. No frontend JS frameworks.
-- One-line file header comment describing purpose; JSDoc on functions >10 lines or non-obvious params.
-- All prompts in `server/ollama/prompts.js` — never inline prompt strings.
-- Validation on every socket event payload before processing.
-- Game state never stored in socket handlers — lives in `GameSession.js` only.
-- Full `game:state` snapshot emitted after every state transition (for reconnection support).

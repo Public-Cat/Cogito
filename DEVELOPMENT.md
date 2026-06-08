@@ -105,7 +105,7 @@ Define and implement these events precisely. Do not rename them.
 | `lobby:setName` | `{ name: string }` | Human player sets their display name |
 | `lobby:start` | — | Host starts the game |
 | `game:sendMessage` | `{ text: string }` | Player sends their turn message |
-| `game:vote` | `{ targetId: string }` | Human player submits their vote |
+| *(removed)* | — | Humans no longer vote — only AIs vote |
 | `game:returnToLobby` | — | Player confirms they saw the end screen |
 
 #### Server → Client
@@ -117,7 +117,7 @@ Define and implement these events precisely. Do not rename them.
 | `game:state` | `{ players, messages, round, phase, turnOrder, currentTurn }` | Full game state snapshot |
 | `game:newMessage` | `{ playerId, playerName, text, timestamp }` | A new chat message |
 | `game:voteStart` | `{ roundNumber }` | Voting phase has begun |
-| `game:voteResult` | `{ aiEliminated: Player\|null, humanEliminated: Player\|null }` | Vote resolution |
+| `game:voteResult` | `{ eliminated: Player\|null }` | Vote resolution (single eliminated player) |
 | `game:ended` | `{ winner: 'humans'\|'ais', players: Player[] }` | Game over |
 | `error` | `{ message: string }` | Server-side error to display to client |
 
@@ -131,7 +131,7 @@ LOBBY → PLAYING → VOTING → PLAYING (loop) → ENDED
 
 - **LOBBY**: Players joining, host configuring. No messages.
 - **PLAYING**: Round-robin messages. After each full round, check if we've hit round 2 yet. If yes, transition to VOTING after the last player's message.
-- **VOTING**: Collect human votes (via socket events). Collect AI votes (via Ollama API calls, made server-side). Once all votes are in, resolve, emit `game:voteResult`, check win condition. If game continues, transition to PLAYING.
+- **VOTING**: Only AIs vote (via Ollama API calls, made server-side). Humans are spectators. Once all AI votes collected (or 10s timeout), resolve, emit `game:voteResult`, check win condition. If game continues, transition to PLAYING.
 - **ENDED**: Emit `game:ended`. Wait for all clients to confirm `game:returnToLobby`, then reset `GameManager`.
 
 ---
@@ -441,7 +441,7 @@ The agent must implement features in this order. Do not skip ahead. Verify each 
 
 ### Phase 5 — Voting
 - [ ] `GameSession.js` — VOTING state, AI vote collection, human vote collection, resolution
-- [ ] Socket handlers — `game:vote`
+- [x] Socket handlers — `game:vote` (removed — humans no longer vote)
 - [ ] `client/js/game.js` — voting overlay, countdown timer
 - [ ] Verify: voting resolves correctly, reveal shows, game continues
 
