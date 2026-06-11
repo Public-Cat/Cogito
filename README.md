@@ -1,12 +1,14 @@
-# 🟢 COGITO — AI Social Deduction Game
+# COGITO — AI Social Deduction Game
 
 > *"Cogito ergo sum. But do you?"*
 
 A real-time, browser-based social deduction game where humans and LLMs engage in conversation — and everyone is trying to figure out who is real. Styled after the Matrix: neon green on black, terminal flicker, and the constant dread that the machine might be smarter than you.
 
+![Lobby](screenshots/lobby.png)
+
 ---
 
-## 🎮 What Is This?
+## What Is This?
 
 **Cogito** is a Mafia-style social deduction game played in a shared chat room.
 
@@ -15,11 +17,35 @@ A real-time, browser-based social deduction game where humans and LLMs engage in
 - After the first two full rounds, AIs vote at the end of every subsequent round — LLMs vote out who they think is human.
 - The game ends when all AIs are eliminated (humans win) or all humans are eliminated (AIs win).
 
-Players join from their phones or browsers — no accounts, no login. Just a code, a name, and your wits.
+Players join from their phones or browsers — no accounts, no login. Just a URL, a name, and your wits.
 
 ---
 
-## 🧱 Tech Stack
+## Screenshots
+
+> **Lobby** — host configures topic, AI count, and models
+
+![Lobby](screenshots/lobby.png)
+
+> **Submitting phase** — all players write simultaneously (15s)
+
+![Submitting](screenshots/game-submitting.png)
+
+> **Revealing phase** — all messages revealed together (10s)
+
+![Revealing](screenshots/game-revealing.png)
+
+> **Voting phase** — AIs vote; humans are spectators
+
+![Voting](screenshots/game-voting.png)
+
+> **End screen** — game result with all identities revealed
+
+![End](screenshots/game-ended.png)
+
+---
+
+## Tech Stack
 
 | Layer | Technology |
 |---|---|
@@ -27,23 +53,22 @@ Players join from their phones or browsers — no accounts, no login. Just a cod
 | Real-time | Socket.IO |
 | Frontend | Vanilla HTML/CSS/JS (no framework) |
 | AI Models | Ollama (local, self-hosted) |
-| Containerization | Docker + Docker Compose |
+| Container | Docker + Docker Compose |
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
-- [Docker](https://www.docker.com/) and Docker Compose installed
-- [Ollama](https://ollama.ai/) running locally on port `11434`
-- At least one model pulled in Ollama (e.g. `ollama pull llama3`)
+- [Docker](https://www.docker.com/) and Docker Compose (v2) installed
+- [Ollama](https://ollama.ai/) running with at least one model pulled (e.g. `ollama pull qwen2.5:7b`)
 - At least 2 human players and 1 AI player to start a game
 
-### Run the Game
+### Run with Docker (Production)
 
 ```bash
-git clone https://github.com/yourname/cogito-game.git
+git clone <repo-url>
 cd cogito-game
 docker compose up --build
 ```
@@ -56,72 +81,100 @@ To let other players join from phones on the same network, share your local IP:
 http://192.168.x.x:3000
 ```
 
+### Run with Node (Development)
+
+```bash
+npm install
+OLLAMA_BASE_URL=http://localhost:11434 npm run dev
+```
+
+Opens on `http://localhost:3000` (configurable via `PORT`).
+
 ---
 
-## 🎲 How to Play
+## How to Play
 
 1. **Host** opens the app and is automatically assigned host privileges.
 2. Host configures: topic (or random), number of AI players, and which Ollama model each AI uses.
 3. Host hits **START** when at least 2 humans and 1 AI are in the lobby.
 4. At game start, AI players automatically generate their own names.
 5. **Other humans** join via the same URL and pick their names.
-6. All players write simultaneously in a 15-second SUBMITTING phase. Messages are held server-side and revealed together in a 10-second REVEALING phase.
-7. From round 3 onwards, a voting phase occurs after every round:
+6. All players write simultaneously in a 15-second SUBMITTING phase. Messages are held server-side.
+7. After the timer (or when all have submitted), messages are revealed together in a 10-second REVEALING phase.
+8. After round 2, a voting phase occurs after every round:
+   - A 5-second VOTING_SOON warning is shown.
    - AIs vote privately and simultaneously (server-side via Ollama) on who they think is human.
    - Humans are spectators during voting — only AIs vote.
    - The player with the majority AI vote is eliminated (or no one, on a tie).
-   - It is then revealed whether the eliminated player was human or AI.
-8. Game ends when all AIs or all humans are eliminated.
+   - A 3-second delay shows the result before the next round begins.
+9. Game ends when all AIs or all humans are eliminated.
 
 Full rules: [RULES.md](./RULES.md)
 
 ---
 
-## 🗂️ Project Structure
+## Project Structure
 
 ```
 cogito-game/
 ├── server/                  # Node.js backend
 │   ├── index.js             # Entry point
 │   ├── game/                # Game state machine
+│   │   ├── GameManager.js   # Singleton session manager
+│   │   ├── GameSession.js   # Phase state machine (SUBMITTING/REVEALING/VOTING)
+│   │   ├── Player.js        # Player model
+│   │   └── topics.js        # ~15 discussion topics
 │   ├── ollama/              # Ollama API integration
-│   └── socket/              # Socket.IO event handlers
+│   │   ├── OllamaClient.js  # HTTP wrapper for /api/chat and /api/tags
+│   │   └── prompts.js       # All AI prompts (never inline)
+│   └── socket/
+│       └── handlers.js      # Socket.IO event handlers
 ├── client/                  # Static frontend
 │   ├── index.html           # Join/lobby screen
 │   ├── game.html            # In-game chat screen
 │   ├── css/
-│   │   └── matrix.css       # Matrix theme
+│   │   └── matrix.css       # Matrix theme (single stylesheet)
 │   ├── js/
 │   │   ├── lobby.js
 │   │   ├── game.js
-│   │   └── sfx.js           # Sound effects
-│   └── assets/
-│       └── sounds/          # Vote/eliminate/win/lose SFX
-├── docker-compose.yml
+│   │   ├── matrixRain.js    # Canvas rain background
+│   │   └── sfx.js           # Programmatic sound effects (Web Audio API)
+├── AGENTS.md                # Agent workflow instructions
+├── RULES.md                 # Full game rules
 ├── Dockerfile
-├── README.md
-├── RULES.md
-└── DEVELOPMENT.md
+├── docker-compose.yml
+├── package.json
+└── .dockerignore
 ```
+
+Sound effects are generated programmatically via the Web Audio API (`client/js/sfx.js`). No audio files required.
 
 ---
 
-## 🌐 Ollama Setup
+## Ollama Setup
 
 The game connects to Ollama at `http://192.168.1.30:11434` by default (configurable via `OLLAMA_BASE_URL` environment variable).
 
-Pull models before starting:
+Pull a model before starting:
 
 ```bash
-ollama pull llama3
-ollama pull mistral
-ollama pull gemma
+ollama pull qwen2.5:7b
 ```
 
-The host will see all available models in the game lobby configuration panel.
+The host will see all available models in the game lobby configuration panel. Models are polled every 30 seconds.
 
 ---
 
-## 📜 License
+## Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `3000` | HTTP port the server listens on |
+| `OLLAMA_BASE_URL` | `http://192.168.1.30:11434` | Base URL for the Ollama API |
+| `NODE_ENV` | `development` | Set to `production` in Docker |
+
+---
+
+## License
 
 MIT. Go wild. Just don't let the AIs know.
