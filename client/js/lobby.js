@@ -1,6 +1,7 @@
 const socket = io();
 
 let scrambleIntervals = [];
+let rulesCache = null;
 
 const app = document.getElementById('app');
 const SCRAMBLE_CHARS = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲンABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -55,6 +56,8 @@ function render() {
       <div style="margin-top:12px;text-align:center;">
         <button id="resetBtn" style="color:var(--color-danger);border-color:var(--color-danger);width:100%;">> HARD RESET</button>
       </div>
+      <button id="rulesToggleBtn" style="width:100%;margin-top:8px;">> RULES</button>
+      <div id="rulesContent" class="rules-content" style="display:none;"></div>
     </div>
   `;
 
@@ -66,6 +69,27 @@ function render() {
     if (confirm('Reset all sessions and kick all players?')) {
       socket.emit('lobby:reset');
     }
+  });
+
+  const rulesToggle = document.getElementById('rulesToggleBtn');
+  const rulesContent = document.getElementById('rulesContent');
+  rulesToggle.addEventListener('click', async () => {
+    if (rulesContent.style.display === 'block') {
+      rulesContent.style.display = 'none';
+      rulesToggle.textContent = '> RULES';
+      return;
+    }
+    if (!rulesCache) {
+      try {
+        const res = await fetch('/api/rules');
+        rulesCache = await res.text();
+      } catch {
+        rulesCache = 'Failed to load rules.';
+      }
+    }
+    rulesContent.textContent = rulesCache;
+    rulesContent.style.display = 'block';
+    rulesToggle.textContent = '> HIDE RULES';
   });
 }
 
