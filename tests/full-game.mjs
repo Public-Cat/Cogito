@@ -113,7 +113,7 @@ async function main() {
       // Race both with a timeout to avoid hanging.
       const next = await Promise.race([
         waitForState(sA).then(s => ({ type: "state", state: s })),
-        new Promise(r => sA.once("game:ended", d => ({ type: "ended", data: d }))),
+        new Promise(r => sA.once("game:ended", d => r({ type: "ended", data: d }))),
         sleep(25000).then(() => ({ type: "timeout" })),
       ]);
 

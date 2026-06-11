@@ -315,7 +315,7 @@ socket.on('host:assigned', () => {
 socket.on('game:state', (state) => {
   clearScrambles();
   localStorage.setItem('cogito_myId', state.myId || '');
-  window.location.href = 'game.html';
+  window.location.href = 'game.html?myId=' + encodeURIComponent(state.myId || '');
 });
 
 socket.on('error', ({ message }) => {
@@ -327,7 +327,8 @@ socket.on('error', ({ message }) => {
   app.appendChild(errDiv);
 });
 
-const savedId = localStorage.getItem('cogito_myId');
+const urlParams = new URLSearchParams(window.location.search);
+const savedId = urlParams.get('myId') || localStorage.getItem('cogito_myId');
 if (savedId) {
   let rejoinResolved = false;
 
@@ -335,7 +336,7 @@ if (savedId) {
     rejoinResolved = true;
     clearScrambles();
     localStorage.setItem('cogito_myId', state.myId || '');
-    window.location.href = 'game.html';
+    window.location.href = 'game.html?myId=' + encodeURIComponent(state.myId || '');
   };
 
   const onError = () => {

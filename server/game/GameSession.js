@@ -28,6 +28,7 @@ export class GameSession {
     this.revealTimer = null;
     this.voteSoonTimer = null;
     this.voteTimeout = null;
+    this.postVoteTimer = null;
     this.aiVotesResolved = false;
   }
 
@@ -377,7 +378,7 @@ export class GameSession {
       eliminated: eliminated ? { id: eliminated.id, name: eliminated.name, isHuman: eliminated.isHuman } : null,
     });
 
-    setTimeout(() => this.checkWinCondition(), 3000);
+    this.postVoteTimer = setTimeout(() => this.checkWinCondition(), 3000);
   }
 
   checkWinCondition() {
@@ -402,6 +403,8 @@ export class GameSession {
     if (this.submitTimer) { clearTimeout(this.submitTimer); this.submitTimer = null; }
     if (this.revealTimer) { clearTimeout(this.revealTimer); this.revealTimer = null; }
     if (this.voteSoonTimer) { clearTimeout(this.voteSoonTimer); this.voteSoonTimer = null; }
+    if (this.voteTimeout) { clearTimeout(this.voteTimeout); this.voteTimeout = null; }
+    if (this.postVoteTimer) { clearTimeout(this.postVoteTimer); this.postVoteTimer = null; }
   }
 
   endGame(winnerType, winnerPlayer = null) {
