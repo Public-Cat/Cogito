@@ -20,9 +20,10 @@
 |---|---|
 | `npm start` | `node server/index.js` |
 | `npm run dev` | `node --watch server/index.js` |
-| `node tests/e2e.mjs` | Socket-level E2E |
+| `node tests/e2e.mjs` | Core lobby + one submit/reveal cycle |
 | `node tests/full-game.mjs` | Full game flow through voting + end |
 | `node tests/rejoin.mjs` | Player reconnection mid-game |
+| `node tests/disconnect.mjs` | Disconnect edge cases (lobby host, mid-game, AI asymmetry) |
 | `node tests/ui-interactive.mjs` | Playwright UI test (2 humans + 1 AI) |
 | `node tests/ui-6p4ai.mjs` | Playwright UI test (6 humans + 4 AIs) |
 | `docker compose up --build` | Production build + run |
@@ -35,8 +36,6 @@ All tests are plain Node scripts (no framework), exit via `process.exit(0|1)`.
 - Ollama at `http://192.168.1.30:11434` with `qwen2.5:7b` pulled
 - Playwright tests need `npm install` (devDeps: `playwright`, `socket.io-client`)
 - Server session is dirty after each test; clean up with `lobby:reset` or `game:returnToLobby`
-
-> ⚠️ **All three socket-level test scripts (`e2e.mjs`, `full-game.mjs`, `rejoin.mjs`) are broken.** They reference a `PLAYING` phase and `currentTurn` field from the old round-robin architecture. The current game uses simultaneous `SUBMITTING`/`REVEALING` phases. Do not rely on them for validation.
 
 ## Game state machine
 `LOBBY → SUBMITTING (15s) → REVEALING (10s) → SUBMITTING (loop, round<2) → VOTING_SOON (5s) → VOTING (10s) → (3s delay) → SUBMITTING or ENDED`
@@ -73,7 +72,6 @@ Full `game:state` emitted after every state transition (for reconnection support
 
 ## References
 - **`DEVELOPMENT.md`** — comprehensive architecture reference. Has been reconciled with the current codebase. Use alongside AGENTS.md for deeper context.
-- **Tests `e2e.mjs`, `full-game.mjs`, `rejoin.mjs`** — **do not run.** They reference `PLAYING` phase and `currentTurn` from the old round-robin architecture. The current game uses simultaneous `SUBMITTING`/`REVEALING` phases.
 
 ## Key conventions
 - **Validation**: Player names `/^[a-zA-Z0-9 ]{1,20}$/`, messages ≤500 chars, both HTML-sanitized. All handlers wrapped in try/catch.
@@ -87,6 +85,8 @@ Full `game:state` emitted after every state transition (for reconnection support
 - **Disconnect**: lobby → removed + host reassigned. Mid-game → `isDisconnected`. In SUBMITTING phase, remaining players may trigger early resolve. Rejoin via `game:rejoin({ playerId })`.
 - **`isDisconnected`** players are excluded from `getActivePlayers()` (treated like eliminated).
 - **AI disconnect asymmetry**: `getActiveAIs()` filters only by `isEliminated` — disconnected AIs still generate messages and vote. Only humans lose active status on disconnect.
+- **Client rejoin**: `client/js/lobby.js` stores `cogito_myId` in localStorage. On page load, emits `game:rejoin` with a 2s timeout — if no `game:state` received, renders lobby fresh.
+- **Dead code**: `GameSession.getAlivePlayers()` (line 68) is identical to `getActivePlayers()` and unused.
 
 ## Ollama
 - Default URL: `http://192.168.1.30:11434` (configurable via `OLLAMA_BASE_URL`)
