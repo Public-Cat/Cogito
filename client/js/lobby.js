@@ -290,7 +290,7 @@ socket.on('host:assigned', () => {
 
 socket.on('game:state', (state) => {
   clearScrambles();
-  sessionStorage.setItem('cogito_myId', state.myId || '');
+  localStorage.setItem('cogito_myId', state.myId || '');
   window.location.href = 'game.html';
 });
 
@@ -303,4 +303,35 @@ socket.on('error', ({ message }) => {
   app.appendChild(errDiv);
 });
 
-render();
+const savedId = localStorage.getItem('cogito_myId');
+if (savedId) {
+  let rejoinResolved = false;
+
+  const onGameState = (state) => {
+    rejoinResolved = true;
+    clearScrambles();
+    localStorage.setItem('cogito_myId', state.myId || '');
+    window.location.href = 'game.html';
+  };
+
+  const onError = () => {
+    rejoinResolved = true;
+    localStorage.removeItem('cogito_myId');
+    render();
+  };
+
+  socket.once('game:state', onGameState);
+  socket.once('error', onError);
+  socket.emit('game:rejoin', { playerId: savedId });
+
+  setTimeout(() => {
+    if (!rejoinResolved) {
+      socket.off('game:state', onGameState);
+      socket.off('error', onError);
+      localStorage.removeItem('cogito_myId');
+      render();
+    }
+  }, 2000);
+} else {
+  render();
+}
