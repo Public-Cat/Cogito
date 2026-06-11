@@ -203,6 +203,7 @@ export function registerHandlers(io, socket) {
           currentSession.advanceTurn();
         }
       }
+      currentSession.emitGameState();
       const gameState = currentSession.getGameState();
       socket.emit('game:state', { ...gameState, myId: player.id });
     } catch (err) {
