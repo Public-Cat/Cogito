@@ -6,6 +6,10 @@ let myId = sessionStorage.getItem('cogito_myId') || null;
 let gameState = null;
 let voteSoonCountdown = null;
 let voteSoonInterval = null;
+let submitCountdown = 15;
+let revealCountdown = 10;
+let submitCountdownInterval = null;
+let revealCountdownInterval = null;
 
 const app = document.getElementById('app');
 
@@ -31,7 +35,7 @@ function render() {
     </div>
     <div id="votingOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.95);z-index:100;justify-content:center;align-items:center;flex-direction:column;">
       <h2 style="color:var(--color-warning);margin-bottom:24px;">> VOTING PHASE</h2>
-      <p id="voteTimer" style="color:var(--color-text-dim);margin-bottom:16px;">5</p>
+      <p id="voteTimer" style="color:var(--color-text-dim);margin-bottom:16px;">10</p>
       <div id="voteTargets" style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;max-width:600px;"></div>
       <div id="voteWaiting" style="display:none;color:var(--color-text-dim);margin-top:24px;">> WAITING FOR VOTES...</div>
     </div>
@@ -72,6 +76,59 @@ function sendMessage() {
   document.getElementById('sendBtn').disabled = true;
 }
 
+function stopCountdowns() {
+  if (submitCountdownInterval) { clearInterval(submitCountdownInterval); submitCountdownInterval = null; }
+  if (revealCountdownInterval) { clearInterval(revealCountdownInterval); revealCountdownInterval = null; }
+}
+
+function startSubmitCountdown() {
+  submitCountdown = 15;
+  stopCountdowns();
+  submitCountdownInterval = setInterval(() => {
+    submitCountdown--;
+    updateIndicator();
+    if (submitCountdown <= 0) {
+      clearInterval(submitCountdownInterval);
+      submitCountdownInterval = null;
+    }
+  }, 1000);
+}
+
+function startRevealCountdown() {
+  revealCountdown = 10;
+  stopCountdowns();
+  revealCountdownInterval = setInterval(() => {
+    revealCountdown--;
+    updateIndicator();
+    if (revealCountdown <= 0) {
+      clearInterval(revealCountdownInterval);
+      revealCountdownInterval = null;
+    }
+  }, 1000);
+}
+
+function updateIndicator() {
+  const state = gameState;
+  if (!state) return;
+  const el = document.getElementById('turnIndicator');
+  if (state.phase === 'SUBMITTING') {
+    const hasSubmitted = state.submittedBy && state.submittedBy.includes(myId);
+    if (!hasSubmitted) {
+      el.textContent = `> write your response (${submitCountdown}s)`;
+    } else {
+      const remaining = state.activePlayerCount - state.submittedBy.length;
+      el.textContent = `> waiting for ${remaining} player(s)... (${submitCountdown}s)`;
+    }
+  } else if (state.phase === 'REVEALING') {
+    el.textContent = `> reading responses... (${revealCountdown}s)`;
+  } else if (state.phase === 'VOTING_SOON') {
+    const remaining = voteSoonCountdown !== null ? voteSoonCountdown : 5;
+    el.textContent = `> voting in ${remaining}s...`;
+  } else {
+    el.textContent = '';
+  }
+}
+
 function updateUI(state) {
   gameState = state;
   if (state.myId) {
@@ -82,37 +139,39 @@ function updateUI(state) {
   document.getElementById('roundDisplay').textContent = `round ${state.round}`;
   document.getElementById('phaseDisplay').textContent = state.phase;
 
-  const isMyTurn = state.currentTurn === myId;
+  document.getElementById('eliminationOverlay').style.display = 'none';
+  document.getElementById('votingOverlay').style.display = 'none';
+
   const input = document.getElementById('msgInput');
   const sendBtn = document.getElementById('sendBtn');
-  const turnIndicator = document.getElementById('turnIndicator');
 
-  if (state.phase === 'PLAYING') {
-    document.getElementById('eliminationOverlay').style.display = 'none';
-    input.disabled = !isMyTurn;
-    sendBtn.disabled = !isMyTurn;
-    if (isMyTurn) {
-      turnIndicator.textContent = '> your turn';
+  if (state.phase === 'SUBMITTING') {
+    const hasSubmitted = state.submittedBy && state.submittedBy.includes(myId);
+    input.disabled = hasSubmitted;
+    sendBtn.disabled = hasSubmitted;
+    if (!hasSubmitted) {
       input.focus();
-    } else {
-      const currentPlayer = state.players.find(p => p.id === state.currentTurn);
-      turnIndicator.textContent = currentPlayer ? `> waiting for ${currentPlayer.name}...` : '> waiting...';
     }
+    updateIndicator();
+  } else if (state.phase === 'REVEALING') {
+    input.disabled = true;
+    sendBtn.disabled = true;
+    updateIndicator();
   } else if (state.phase === 'VOTING_SOON') {
     input.disabled = true;
     sendBtn.disabled = true;
     const remaining = voteSoonCountdown !== null ? voteSoonCountdown : 5;
-    turnIndicator.textContent = `> voting in ${remaining}s...`;
+    document.getElementById('turnIndicator').textContent = `> voting in ${remaining}s...`;
   } else {
     input.disabled = true;
     sendBtn.disabled = true;
-    turnIndicator.textContent = '';
+    document.getElementById('turnIndicator').textContent = '';
   }
 
-  renderPlayerList(state.players, state.currentTurn);
+  renderPlayerList(state.players, state.submittedBy || []);
 }
 
-function renderPlayerList(players, currentTurnId) {
+function renderPlayerList(players, submittedBy) {
   const sidebar = document.getElementById('playerSidebar');
   sidebar.style.display = 'block';
   sidebar.innerHTML = `
@@ -135,12 +194,16 @@ function renderPlayerList(players, currentTurnId) {
     div.style.justifyContent = 'space-between';
     div.style.alignItems = 'center';
     if (p.isEliminated) div.style.opacity = '0.4';
-    if (p.id === currentTurnId) {
+    const hasSubmitted = submittedBy.includes(p.id);
+    if (hasSubmitted && !p.isEliminated) {
       div.style.borderLeft = '2px solid var(--color-primary)';
       div.style.paddingLeft = '4px';
     }
     const nameSpan = document.createElement('span');
     nameSpan.textContent = `> ${p.name}`;
+    if (hasSubmitted && !p.isEliminated) {
+      nameSpan.textContent += ' \u2713';
+    }
     if (p.isEliminated) {
       const termTag = document.createElement('span');
       termTag.textContent = ' [TERMINATED]';
@@ -292,6 +355,16 @@ socket.on('game:state', (state) => {
     container.innerHTML = '';
     state.messages.forEach(msg => addMessage(msg, false));
   }
+  if (state.phase === 'SUBMITTING') {
+    startSubmitCountdown();
+  } else if (state.phase === 'REVEALING') {
+    stopCountdowns();
+    startRevealCountdown();
+  } else if (state.phase === 'VOTING') {
+    stopCountdowns();
+  } else {
+    stopCountdowns();
+  }
 });
 
 socket.on('game:newMessage', (msg) => {
@@ -339,7 +412,7 @@ socket.on('game:voteStart', () => {
 });
 
 socket.on('game:voteResult', (result) => {
-  if (result.aiEliminated || result.humanEliminated) {
+  if (result.eliminated) {
     playEliminated();
   }
   showVoteResult(result);

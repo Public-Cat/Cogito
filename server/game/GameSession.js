@@ -5,7 +5,8 @@ import { buildSystemPrompt, buildTurnPrompt, buildVotePrompt, buildNamePrompt } 
 
 const STATES = {
   LOBBY: 'LOBBY',
-  PLAYING: 'PLAYING',
+  SUBMITTING: 'SUBMITTING',
+  REVEALING: 'REVEALING',
   VOTING_SOON: 'VOTING_SOON',
   VOTING: 'VOTING',
   ENDED: 'ENDED',
@@ -18,11 +19,16 @@ export class GameSession {
     this.messages = [];
     this.topic = '';
     this.round = 0;
-    this.turnOrder = [];
-    this.currentTurnIndex = 0;
     this.aiVotes = new Map();
     this.emitToAll = null;
     this.emitToSocket = null;
+    this.submittedPlayerIds = new Set();
+    this.pendingMessages = [];
+    this.submitTimer = null;
+    this.revealTimer = null;
+    this.voteSoonTimer = null;
+    this.voteTimeout = null;
+    this.aiVotesResolved = false;
   }
 
   addPlayer(id, isHuman, socketId) {
@@ -81,13 +87,14 @@ export class GameSession {
     if (this.state === STATES.LOBBY) {
       this.removePlayer(socketId);
       if (player.isHost) this.assignHost();
-    } else if (this.state === STATES.PLAYING || this.state === STATES.VOTING || this.state === STATES.VOTING_SOON) {
+    } else if (this.state === STATES.SUBMITTING || this.state === STATES.REVEALING
+      || this.state === STATES.VOTING || this.state === STATES.VOTING_SOON) {
       player.isDisconnected = true;
       player.isActive = false;
-      if (this.state === STATES.PLAYING) {
-        const currentPlayer = this.turnOrder[this.currentTurnIndex];
-        if (currentPlayer && currentPlayer.id === player.id) {
-          this.advanceTurn();
+      if (this.state === STATES.SUBMITTING) {
+        this.submittedPlayerIds.delete(player.id);
+        if (this.submittedPlayerIds.size >= this.getActivePlayers().length) {
+          this.resolveSubmitPhase();
         }
       }
     }
@@ -106,7 +113,6 @@ export class GameSession {
   }
 
   getGameState() {
-    const currentPlayer = this.turnOrder[this.currentTurnIndex] || null;
     return {
       players: this.players.map(p => ({
         id: p.id,
@@ -118,9 +124,9 @@ export class GameSession {
       messages: this.messages,
       round: this.round,
       phase: this.state,
-      turnOrder: this.turnOrder.map(p => p.id),
-      currentTurn: currentPlayer ? currentPlayer.id : null,
       topic: this.topic,
+      submittedBy: [...this.submittedPlayerIds],
+      activePlayerCount: this.getActivePlayers().length,
     };
   }
 
@@ -162,88 +168,122 @@ export class GameSession {
       ];
     }))
 
-    const humanPlayers = this.players.filter(p => p.isHuman);
-    const aiPlayers = this.players.filter(p => !p.isHuman);
-    this.turnOrder = [...humanPlayers, ...aiPlayers].sort(() => Math.random() - 0.5);
-    this.currentTurnIndex = 0;
     this.round = 0;
-    this.state = STATES.PLAYING;
     console.log(`[GAME] Game started | Topic: "${this.topic}" | Players: [${this.players.map(p => p.name).join(', ')}]`);
+    this.startSubmitPhase();
   }
 
-  async handleTurn() {
-    if (this.state !== STATES.PLAYING) return;
-    const activePlayers = this.players.filter(p => !p.isEliminated);
+  startSubmitPhase() {
+    this.state = STATES.SUBMITTING;
+    this.submittedPlayerIds = new Set();
+    this.pendingMessages = [];
+    this.emitGameState();
+
+    const activePlayers = this.getActivePlayers();
     if (activePlayers.length <= 1) {
       this.endGame();
       return;
     }
-    if (activePlayers.every(p => p.isDisconnected)) return;
 
-    const currentPlayer = this.turnOrder[this.currentTurnIndex];
-    if (!currentPlayer || currentPlayer.isEliminated || currentPlayer.isDisconnected) {
-      this.advanceTurn();
-      return;
+    const activeAIs = activePlayers.filter(p => !p.isHuman);
+    for (const ai of activeAIs) {
+      this.generateAIMessage(ai);
     }
 
-    if (!currentPlayer.isHuman) {
-      const newMessages = this.messages.slice(currentPlayer.lastMessageIndex);
-      if (newMessages.length > 0) {
-        const transcript = newMessages.map(m => `[${m.playerName}]: ${m.text}`).join('\n');
-        currentPlayer.messageHistory.push({ role: 'user', content: transcript });
-      }
-      currentPlayer.lastMessageIndex = this.messages.length;
-      currentPlayer.messageHistory.push({ role: 'user', content: buildTurnPrompt() });
-      const reply = await chat(currentPlayer.model, currentPlayer.messageHistory);
-      if (this.state !== STATES.PLAYING) return;
-      currentPlayer.messageHistory.push({ role: 'assistant', content: reply });
-      console.log(`[AI] ${currentPlayer.name} wrote: "${reply}"`);
-      const message = {
-        playerId: currentPlayer.id,
-        playerName: currentPlayer.name,
-        text: reply,
-        timestamp: Date.now(),
-      };
-      this.messages.push(message);
-      this.emitToAll('game:newMessage', message);
-      this.advanceTurn();
+    this.submitTimer = setTimeout(() => this.resolveSubmitPhase(), 15000);
+  }
+
+  async generateAIMessage(ai) {
+    const messages = [...ai.messageHistory, { role: 'user', content: buildTurnPrompt() }];
+    const reply = await chat(ai.model, messages);
+    if (this.state !== STATES.SUBMITTING) return;
+
+    ai.messageHistory.push({ role: 'user', content: buildTurnPrompt() });
+    ai.messageHistory.push({ role: 'assistant', content: reply });
+
+    const msg = {
+      playerId: ai.id,
+      playerName: ai.name,
+      text: reply,
+      timestamp: Date.now(),
+    };
+    this.pendingMessages.push(msg);
+    this.submittedPlayerIds.add(ai.id);
+
+    if (this.submittedPlayerIds.size >= this.getActivePlayers().length) {
+      this.resolveSubmitPhase();
     }
   }
 
-  advanceTurn() {
-    if (this.state !== STATES.PLAYING) return;
+  handleHumanSubmit(player, text) {
+    if (this.state !== STATES.SUBMITTING) return false;
+    if (player.isEliminated || player.isDisconnected) return false;
+    if (this.submittedPlayerIds.has(player.id)) return false;
 
-    while (true) {
-      const activePlayers = this.players.filter(p => !p.isEliminated);
-      if (activePlayers.length <= 1) {
-        this.endGame();
-        return;
-      }
-      if (activePlayers.every(p => p.isDisconnected)) return;
+    const msg = {
+      playerId: player.id,
+      playerName: player.name,
+      text,
+      timestamp: Date.now(),
+    };
+    this.pendingMessages.push(msg);
+    this.submittedPlayerIds.add(player.id);
 
-      this.currentTurnIndex++;
-      if (this.currentTurnIndex >= this.turnOrder.length) {
-        this.currentTurnIndex = 0;
-        this.round++;
-        console.log(`[GAME] Round ${this.round} started`);
-        if (this.round >= 2) {
-          this.state = STATES.VOTING_SOON;
-          console.log(`[GAME] Round ${this.round} — voting starts in 5s`);
-          this.emitToAll('game:votingSoon', { delay: 5 });
-          this.emitGameState();
-          setTimeout(() => this.startVoting(), 5000);
-          return;
-        }
-      }
+    if (this.submittedPlayerIds.size >= this.getActivePlayers().length) {
+      this.resolveSubmitPhase();
+    }
+    return true;
+  }
 
-      const currentPlayer = this.turnOrder[this.currentTurnIndex];
-      if (currentPlayer && !currentPlayer.isEliminated && !currentPlayer.isDisconnected) {
-        this.emitGameState();
-        if (!currentPlayer.isHuman) {
-          this.handleTurn();
-        }
-        return;
+  resolveSubmitPhase() {
+    if (this.state !== STATES.SUBMITTING) return;
+    this.clearTimers();
+
+    for (const ai of this.getActiveAIs()) {
+      const othersMsgs = this.pendingMessages.filter(m => m.playerId !== ai.id);
+      if (othersMsgs.length > 0) {
+        const transcript = othersMsgs.map(m => `[${m.playerName}]: ${m.text}`).join('\n');
+        ai.messageHistory.push({ role: 'user', content: transcript });
       }
+      ai.lastMessageIndex = this.messages.length + this.pendingMessages.length;
+    }
+
+    for (const msg of this.pendingMessages) {
+      this.messages.push(msg);
+      this.emitToAll('game:newMessage', msg);
+    }
+    this.pendingMessages = [];
+    this.submittedPlayerIds = new Set();
+
+    this.startRevealPhase();
+  }
+
+  startRevealPhase() {
+    this.state = STATES.REVEALING;
+    this.emitGameState();
+    this.revealTimer = setTimeout(() => this.resolveRevealPhase(), 10000);
+  }
+
+  resolveRevealPhase() {
+    if (this.state !== STATES.REVEALING) return;
+    this.clearTimers();
+    this.round++;
+    console.log(`[GAME] Round ${this.round} completed`);
+
+    const activePlayers = this.getActivePlayers();
+    if (activePlayers.length <= 1) {
+      this.endGame();
+      return;
+    }
+
+    if (this.round >= 2) {
+      this.state = STATES.VOTING_SOON;
+      console.log(`[GAME] Round ${this.round} — voting starts in 5s`);
+      this.emitToAll('game:votingSoon', { delay: 5 });
+      this.emitGameState();
+      this.voteSoonTimer = setTimeout(() => this.startVoting(), 5000);
+    } else {
+      this.startSubmitPhase();
     }
   }
 
@@ -349,31 +389,25 @@ export class GameSession {
     } else if (aliveAIs.length === 0) {
       this.endGame('humans');
     } else {
-      this.state = STATES.PLAYING;
       console.log(`[GAME] No winner yet — continuing (Humans: ${aliveHumans.length}, AIs: ${aliveAIs.length})`);
-      while (this.currentTurnIndex < this.turnOrder.length) {
-        const p = this.turnOrder[this.currentTurnIndex];
-        if (p && !p.isEliminated && !p.isDisconnected) break;
-        this.currentTurnIndex++;
-      }
-      if (this.currentTurnIndex >= this.turnOrder.length) {
-        this.currentTurnIndex = 0;
-        this.round++;
-      }
-      this.emitGameState();
-      if (this.turnOrder[this.currentTurnIndex] && !this.turnOrder[this.currentTurnIndex].isHuman) {
-        this.handleTurn();
-      }
+      this.startSubmitPhase();
     }
   }
 
+  clearTimers() {
+    if (this.submitTimer) { clearTimeout(this.submitTimer); this.submitTimer = null; }
+    if (this.revealTimer) { clearTimeout(this.revealTimer); this.revealTimer = null; }
+    if (this.voteSoonTimer) { clearTimeout(this.voteSoonTimer); this.voteSoonTimer = null; }
+  }
+
   endGame(winner) {
-    this.state = STATES.ENDED;
-    console.log(`[GAME] Game ended — ${winner || this.determineWinner()} win!`);
+    this.clearTimers();
     if (this.voteTimeout) {
       clearTimeout(this.voteTimeout);
       this.voteTimeout = null;
     }
+    this.state = STATES.ENDED;
+    console.log(`[GAME] Game ended — ${winner || this.determineWinner()} win!`);
     this.emitToAll('game:ended', {
       winner: winner || this.determineWinner(),
       players: this.players.map(p => ({

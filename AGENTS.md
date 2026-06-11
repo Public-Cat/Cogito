@@ -36,18 +36,17 @@ All tests are plain Node scripts (no framework), exit via `process.exit(0|1)`.
 - Server session is dirty after each test; clean up with `lobby:reset` or `game:returnToLobby`
 
 ## Game state machine
-`LOBBY → PLAYING → VOTING_SOON (5s) → VOTING (10s timeout) → PLAYING (loop) → ENDED`
+`LOBBY → SUBMITTING (15s) → REVEALING (10s) → SUBMITTING (loop, round<2) → VOTING_SOON (5s) → VOTING (10s) → SUBMITTING (continue) → ... → ENDED`
 
-Minimum **2 humans + 1 AI** to start. Voting starts after round 2, then every round.
-Human votes visible to all humans; AI votes are private.
+All players (humans + AIs) write simultaneously during SUBMITTING phase (15s). All responses are revealed together in REVEALING phase (10s). Minimum **2 humans + 1 AI** to start. Voting starts after round 2, then every round.
 
 ## Key files
 | File | Role |
 |---|---|
 | `server/index.js` | Express app, Socket.IO init, static files, `/api/models` |
 | `server/game/GameManager.js` | Singleton — `getOrCreateSession()`, `reset()`, `generatePlayerId()` |
-| `server/game/GameSession.js` | State machine, turn logic, vote resolution, win conditions |
-| `server/game/Player.js` | Player model (isHuman, isEliminated, isDisconnected, messageHistory[]) |
+| `server/game/GameSession.js` | State machine, submit/reveal phases, AI vote resolution, win conditions |
+| `server/game/Player.js` | Player model (isHuman, isEliminated, isDisconnected, messageHistory[], lastMessageIndex, model) |
 | `server/game/topics.js` | Array of ~15 discussion topics |
 | `server/ollama/OllamaClient.js` | HTTP wrapper for Ollama `/api/chat` and `/api/tags` |
 | `server/ollama/prompts.js` | All AI prompts — never inline |
@@ -58,26 +57,27 @@ Human votes visible to all humans; AI votes are private.
 ## Socket events
 **Client→Server:**
 - `lobby:setName({ name })` — join or rename
-- `lobby:start({ topic, aiPlayers })` — host starts game (`aiPlayers: [{ model }]`)
-- `game:sendMessage({ text })` — submit turn message
-- `game:vote({ targetId })` — human player votes
-- `game:returnToLobby` — return after end screen
+- `lobby:start({ topic, aiPlayers })` — host starts game (`aiPlayers: [{ model }]`). Uses **callback** for confirmation.
+- `game:sendMessage({ text })` — submit message in SUBMITTING phase. Server validates: active, not yet submitted.
+- `game:returnToLobby` — return after end screen (resets session)
 - `lobby:reset` — force server reset
 - `game:rejoin({ playerId })` — reconnect mid-game
 
 **Server→Client:**
-- `lobby:state`, `host:assigned`, `game:state`, `game:newMessage`, `game:votingSoon`, `game:voteStart`, `game:voteResult`, `game:ended`, `error`
+- `lobby:state`, `host:assigned`, `game:state` (+ `myId`, `submittedBy[]`, `activePlayerCount`), `game:newMessage`, `game:votingSoon` (`{ delay: 5 }`), `game:voteStart`, `game:voteResult` (`{ eliminated: {id,name,isHuman}|null }`), `game:ended` (`{ winner, players[] }`), `error`
 
-Full `game:state` emitted after every state transition (for reconnection support).
+Full `game:state` emitted after every state transition (for reconnection support). `game:newMessage` is emitted in batch at start of REVEALING phase, not per-message in real-time.
 
 ## Key conventions
 - **Validation**: Player names `/^[a-zA-Z0-9 ]{1,20}$/`, messages ≤500 chars, both HTML-sanitized. All handlers wrapped in try/catch.
 - **Game state** lives only in `GameSession.js` — never in socket handlers.
 - **All prompts** in `server/ollama/prompts.js` — never inline.
-- **AI memory**: `messageHistory[]` per AI player, round transcripts as single `user` entry, `lastMessageIndex` prevents resends.
+- **AI memory**: `messageHistory[]` per AI player, round transcripts appended in `resolveSubmitPhase` (filtered to exclude AI's own messages), `lastMessageIndex` prevents resends. `model` field on Player stores which Ollama model they use.
+- **AI name generation**: At game start via `buildNamePrompt()`, retries on duplicates (up to 10 tries), fallback to `AI-xxxx`.
 - **AI vote parsing**: Fuzzy case-insensitive `includes()` match against player names, sorted longest-first to avoid partial-name collisions.
-- **Disconnect**: lobby → removed + host reassigned. Mid-game → `isDisconnected`, turn auto-advances. Rejoin via `game:rejoin({ playerId })`.
-- **`isDisconnected`** players are skipped in turn order (treated like eliminated).
+- **Vote resolution**: AI-only. Majority vote eliminates; ties eliminate no one.
+- **Disconnect**: lobby → removed + host reassigned. Mid-game → `isDisconnected`. In SUBMITTING phase, remaining players may trigger early resolve. Rejoin via `game:rejoin({ playerId })`.
+- **`isDisconnected`** players are excluded from `getActivePlayers()` (treated like eliminated).
 
 ## Ollama
 - Default URL: `http://192.168.1.30:11434` (configurable via `OLLAMA_BASE_URL`)
