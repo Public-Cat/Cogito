@@ -39,9 +39,9 @@ All tests are plain Node scripts (no framework), exit via `process.exit(0|1)`.
 > ⚠️ **All three socket-level test scripts (`e2e.mjs`, `full-game.mjs`, `rejoin.mjs`) are broken.** They reference a `PLAYING` phase and `currentTurn` field from the old round-robin architecture. The current game uses simultaneous `SUBMITTING`/`REVEALING` phases. Do not rely on them for validation.
 
 ## Game state machine
-`LOBBY → SUBMITTING (15s) → REVEALING (10s) → SUBMITTING (loop, round<2) → VOTING_SOON (5s) → VOTING (10s) → SUBMITTING (continue) → ... → ENDED`
+`LOBBY → SUBMITTING (15s) → REVEALING (10s) → SUBMITTING (loop, round<2) → VOTING_SOON (5s) → VOTING (10s) → (3s delay) → SUBMITTING or ENDED`
 
-All players (humans + AIs) write simultaneously during SUBMITTING phase (15s). All responses are revealed together in REVEALING phase (10s). Minimum **2 humans + 1 AI** to start. Voting starts after round 2, then every round.
+All players (humans + AIs) write simultaneously during SUBMITTING phase (15s). All responses are revealed together in REVEALING phase (10s). Minimum **2 humans + 1 AI** to start. Voting starts after round 2, then every round. After votes resolve (`resolveVotes`), there's a **3-second `setTimeout`** before `checkWinCondition` transitions to the next phase — this lets the UI show the vote result before continuing.
 
 ## Key files
 | File | Role |
@@ -78,7 +78,7 @@ Full `game:state` emitted after every state transition (for reconnection support
 ## Key conventions
 - **Validation**: Player names `/^[a-zA-Z0-9 ]{1,20}$/`, messages ≤500 chars, both HTML-sanitized. All handlers wrapped in try/catch.
 - **Game state** lives only in `GameSession.js` — never in socket handlers.
-- **`emitToAll` / `emitToSocket`** are set by `lobby:start` handler. `GameSession` cannot emit before `startGame()` is called.
+- **`emitToAll` / `emitToSocket`** are set by `lobby:start` handler *after* the initial `game:state` is emitted directly via `io.to(p.socketId).emit()`. `GameSession` cannot emit before `startGame()` is called.
 - **All prompts** in `server/ollama/prompts.js` — never inline. Exports: `buildSystemPrompt`, `buildTurnPrompt`, `buildVotePrompt`, `buildNamePrompt`.
 - **AI memory**: `messageHistory[]` per AI player, round transcripts appended in `resolveSubmitPhase` (filtered to exclude AI's own messages), `lastMessageIndex` prevents resends. `model` field on Player stores which Ollama model they use.
 - **AI name generation**: At game start via `buildNamePrompt()`, retries on duplicates (up to 10 tries), fallback to `AI-xxxx`.
