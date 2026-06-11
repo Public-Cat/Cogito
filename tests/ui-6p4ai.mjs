@@ -16,7 +16,6 @@ async function run() {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 
-  // Create pages for each human player
   const pages = [];
   for (let i = 0; i < NUM_HUMANS; i++) {
     pages.push(await context.newPage());
@@ -39,7 +38,6 @@ async function run() {
     // ── PHASE 2: ALL PLAYERS JOIN LOBBY ────────────────────────
     console.log('--- Phase 2: All players join lobby ---');
 
-    // Helper: load page, join with name, wait for lobby state
     async function joinLobby(page, name) {
       await page.goto(SERVER, { waitUntil: 'domcontentloaded' });
       await page.waitForSelector('canvas', { state: 'attached', timeout: 5000 });
@@ -48,19 +46,16 @@ async function run() {
       await page.waitForSelector('#lobbyContent', { state: 'attached', timeout: 5000 });
     }
 
-    // Host joins first
     await joinLobby(pages[0], HUMAN_NAMES[0]);
     await sleep(300);
     console.log(`  [1] ${HUMAN_NAMES[0]} joined (host)`);
 
-    // Other players join
     for (let i = 1; i < NUM_HUMANS; i++) {
       await joinLobby(pages[i], HUMAN_NAMES[i]);
       await sleep(300);
       console.log(`  [${i + 1}] ${HUMAN_NAMES[i]} joined`);
     }
 
-    // Verify player count on host page
     await sleep(500);
     const countText = await pages[0].textContent('#playerCount');
     console.log(`  Host sees: ${countText}`);
@@ -73,7 +68,6 @@ async function run() {
     // ── PHASE 3: CONFIGURE AI AND START ────────────────────────
     console.log('--- Phase 3: Configure AIs and start ---');
 
-    // Add AI slots one at a time
     for (let i = 0; i < NUM_AIS; i++) {
       const addBtn = await pages[0].waitForSelector('text=+ ADD AI', {
         state: 'attached',
@@ -83,28 +77,23 @@ async function run() {
       await sleep(200);
     }
 
-    // Verify all AI selects appeared
     const aiSelects = await pages[0].$$('#aiConfig select');
     console.log(`  AI slots: ${aiSelects.length}`);
     console.assert(aiSelects.length === NUM_AIS, `Expected ${NUM_AIS} AI slots, got ${aiSelects.length}`);
 
-    // Set all AI models
     for (const sel of aiSelects) {
       await sel.selectOption(AI_MODEL);
     }
     console.log(`  All AI models set to ${AI_MODEL}`);
 
-    // Verify start button enabled
     await sleep(500);
     const startEnabled = await pages[0].isEnabled('#startBtn');
     console.assert(startEnabled, 'Start button should be enabled');
     console.log('  Start button enabled');
 
-    // Start the game
     console.log('  Starting game...');
     await pages[0].click('#startBtn');
 
-    // Wait for all players to navigate to game.html
     console.log('  Waiting for all players to reach game.html...');
     await Promise.all(
       pages.map(p =>
@@ -116,7 +105,6 @@ async function run() {
     );
     console.log(`  All ${NUM_HUMANS} players on game.html`);
 
-    // Wait for game state to render
     await Promise.all(
       pages.map(p => p.waitForSelector('#topicDisplay', { state: 'attached', timeout: 10000 }))
     );
@@ -131,9 +119,8 @@ async function run() {
     );
     const phase0 = await pages[0].textContent('#phaseDisplay');
     console.log(`  Host phase: ${phase0}`);
-    console.assert(phase0 === 'PLAYING', `Phase should be PLAYING, got ${phase0}`);
+    if (phase0 !== 'SUBMITTING') throw new Error(`Phase should be SUBMITTING, got ${phase0}`);
 
-    // Verify all players in sidebar
     await sleep(1000);
     const sidebarText = await pages[0].textContent('#playerSidebar');
     for (const name of HUMAN_NAMES) {
@@ -146,180 +133,119 @@ async function run() {
     // ── PHASE 4: GAMEPLAY LOOP ──────────────────────────────────
     console.log('--- Phase 4: Gameplay ---');
 
-    // Helper: send message from a page if it's that player's turn
-    async function sendIfMyTurn(page) {
+    async function waitForPhase(page, phase, timeout = 60000) {
+      await page.waitForFunction(
+        (p) => document.getElementById('phaseDisplay').textContent === p,
+        phase,
+        { timeout }
+      );
+    }
+
+    async function submitIfEnabled(page, text) {
       const input = await page.$('#msgInput');
       if (!input) return false;
       const disabled = await input.getAttribute('disabled');
       if (disabled !== null && disabled !== 'false') return false;
-      // Get the player name from the turn indicator
-      const name = await page.evaluate(() => {
-        const el = document.querySelector('.player-entry span') || document.querySelector('#playerSidebar span');
-        return el ? el.textContent.replace('> ', '') : 'Player';
-      });
-      await page.fill('#msgInput', `${name} analyzing the situation...`);
+      await page.fill('#msgInput', text);
       await page.click('#sendBtn');
       return true;
     }
 
-    let turnsPlayed = 0;
-    const maxTurns = 40; // safety limit
-    let inVoting = false;
+    // Drive the game: SUBMITTING→REVEALING cycles
+    // With 10 players it takes multiple vote rounds to end
     const startTime = Date.now();
+    const MAX_DURATION_MS = 600000; // 10 min safety
+    let roundCount = 0;
+    let voteRoundCount = 0;
+    let gameEnded = false;
 
-    while (turnsPlayed < maxTurns && !inVoting) {
-      // Check if any page hit voting/ended
-      for (const p of pages) {
-        const phase = await p.textContent('#phaseDisplay');
-        if (phase === 'VOTING' || phase === 'VOTING_SOON' || phase === 'ENDED') {
-          console.log(`  Game reached: ${phase} after ${turnsPlayed} turns`);
-          inVoting = true;
-          break;
-        }
+    while (!gameEnded) {
+      if (Date.now() - startTime > MAX_DURATION_MS) {
+        throw new Error('TIMEOUT after ' + (MAX_DURATION_MS / 1000) + 's');
       }
-      if (inVoting) {
-        // If VOTING_SOON, wait for actual VOTING
-        const phase = await pages[0].textContent('#phaseDisplay');
-        if (phase === 'VOTING_SOON') {
-          console.log('  Waiting for voting to start (VOTING_SOON)...');
+
+      const phase = await pages[0].textContent('#phaseDisplay');
+
+      if (phase === 'SUBMITTING') {
+        roundCount++;
+        console.log(`  SUBMITTING round ${roundCount} — submitting all humans...`);
+
+        for (let i = 0; i < NUM_HUMANS; i++) {
+          await submitIfEnabled(pages[i], `${HUMAN_NAMES[i]} discussing the current topic.`);
+        }
+
+        await waitForPhase(pages[0], 'REVEALING', 30000);
+        const msgs = await pages[0].$$('#messages > *');
+        console.log(`  REVEALING round ${roundCount}: ${msgs.length} messages`);
+
+      } else if (phase === 'VOTING_SOON') {
+        console.log('  VOTING_SOON — waiting for VOTING phase...');
+        await waitForPhase(pages[0], 'VOTING', 30000);
+
+      } else if (phase === 'VOTING') {
+        voteRoundCount++;
+        console.log(`  VOTING round ${voteRoundCount} — AI-only vote, humans spectate...`);
+
+        // Verify voting overlay
+        await pages[0].waitForFunction(
+          () => {
+            const el = document.getElementById('votingOverlay');
+            return el && el.style.display === 'flex';
+          },
+          { timeout: 20000 }
+        );
+
+        const spectatorMsg = await pages[0].textContent('#voteTargets');
+        console.assert(spectatorMsg.includes('AI players are voting'), 'Should show AI voting message');
+
+        // Wait for vote resolution + post-vote transition
+        // After voteResult, 3s delay, then either SUBMITTING or ENDED
+        await sleep(4000);
+        const afterVote = await pages[0].textContent('#phaseDisplay');
+        console.log(`  After vote: ${afterVote}`);
+
+        // If still in VOTING, wait for the transition
+        if (afterVote === 'VOTING') {
           await pages[0].waitForFunction(
-            () => ['VOTING', 'ENDED'].includes(document.getElementById('phaseDisplay').textContent),
-            undefined, { timeout: 60000 }
+            () => {
+              const el = document.getElementById('phaseDisplay');
+              return el && ['SUBMITTING', 'ENDED'].includes(el.textContent);
+            },
+            undefined, { timeout: 30000 }
           );
         }
-        break;
-      }
 
-      // Try each player's page to see if it's their turn
-      let anySent = false;
-      for (const p of pages) {
-        const sent = await sendIfMyTurn(p);
-        if (sent) {
-          turnsPlayed++;
-          anySent = true;
-          break; // Only one player can act per turn
-        }
-      }
+      } else if (phase === 'ENDED') {
+        gameEnded = true;
 
-      if (!anySent) {
-        await sleep(1000); // AI is thinking or game processing
-      }
+      } else if (phase === 'REVEALING') {
+        // Already handled in SUBMITTING branch; just wait for next phase
+        await pages[0].waitForFunction(
+          () => {
+            const el = document.getElementById('phaseDisplay');
+            return el && el.textContent !== 'REVEALING';
+          },
+          undefined, { timeout: 30000 }
+        );
 
-      // Timeout after 10 minutes
-      if (Date.now() - startTime > 600000) {
-        console.log('  TIMEOUT: Gameplay took too long');
-        break;
+      } else {
+        await sleep(1000);
       }
     }
 
-    const gameplayTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     const finalPhase = await pages[0].textContent('#phaseDisplay');
     const totalMsgs = (await pages[0].$$('#messages > *')).length;
-    console.log(`  Turns: ${turnsPlayed}, Phase: ${finalPhase}, Messages: ${totalMsgs}, Time: ${gameplayTime}s`);
-
-    // At this point the game should be in VOTING or ENDED
-    // With 10 players and 2 rounds, we need 20 turns (minus AI auto-advance)
-    console.assert(
-      turnsPlayed >= 8,
-      `Expected at least 8 human turns, got ${turnsPlayed}`
-    );
-
-    console.log('');
-
-    // ── PHASE 5-6: VOTE AND CONTINUE ────────────────────────────
-    // With 10 players the game takes multiple vote rounds to end.
-    // Play through 2 vote cycles to verify the full loop.
-    let voteRounds = 0;
-    const maxVoteRounds = 2;
-    let gameEnded = false;
-    const roundStartTime = Date.now();
-
-    async function playTurnsUntilVoting(timeoutMs) {
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        const phase = await pages[0].textContent('#phaseDisplay');
-        if (phase === 'VOTING' || phase === 'ENDED') return phase;
-
-        if (phase === 'VOTING_SOON') {
-          console.log('  Waiting for voting to start (VOTING_SOON)...');
-          await pages[0].waitForFunction(
-            () => ['VOTING', 'ENDED'].includes(document.getElementById('phaseDisplay').textContent),
-            undefined, { timeout: 60000 }
-          );
-          return await pages[0].textContent('#phaseDisplay');
-        }
-
-        let anySent = false;
-        for (const p of pages) {
-          const input = await p.$('#msgInput');
-          if (!input) continue;
-          const disabled = await input.getAttribute('disabled');
-          if (disabled !== null && disabled !== 'false') continue;
-          await p.fill('#msgInput', `continuing the discussion...`);
-          await p.click('#sendBtn');
-          anySent = true;
-          break;
-        }
-
-        if (!anySent) {
-          await sleep(1000); // AI is thinking or game processing
-        }
-      }
-      return pages[0].textContent('#phaseDisplay');
-    }
-
-    async function doVoteRound() {
-      voteRounds++;
-      console.log(`\n--- Vote Round ${voteRounds} ---`);
-
-      // Wait for voting overlay
-      await pages[0].waitForFunction(
-        () => {
-          const el = document.getElementById('votingOverlay');
-          return el && el.style.display === 'flex';
-        },
-        { timeout: 15000 }
-      );
-      console.log('  Voting overlay visible');
-
-      // Verify spectator mode — no vote buttons, AI voting message
-      const spectatorMsg = await pages[0].textContent('#voteTargets');
-      console.assert(spectatorMsg.includes('AI players are voting'), 'Should show AI voting message');
-      console.log('  Humans are spectators during AI vote');
-
-      // Wait for vote resolution
-      await sleep(3000);
-      const phase = await pages[0].textContent('#phaseDisplay');
-      console.log(`  After vote: ${phase}`);
-      return phase;
-    }
-
-    // First vote round
-    let phase = await playTurnsUntilVoting(120000);
-    if (phase === 'VOTING') phase = await doVoteRound();
-
-    // If game continues, play another cycle
-    if (phase === 'PLAYING') {
-      phase = await playTurnsUntilVoting(180000);
-      if (phase === 'VOTING') phase = await doVoteRound();
-    }
-
-    if (phase === 'ENDED') gameEnded = true;
-
-    const elapsed = ((Date.now() - roundStartTime) / 1000).toFixed(1);
-    const sidebarOk = await pages[0].textContent('#playerSidebar');
-    console.assert(sidebarOk.length > 0, 'Sidebar should still have content');
     console.log(
-      `  Final: ${phase}, Vote rounds: ${voteRounds}, Time: ${elapsed}s` +
-      (gameEnded ? ', Game ended' : '')
+      `  Final: ${finalPhase}, Rounds: ${roundCount}, Vote rounds: ${voteRoundCount}, ` +
+      `Messages: ${totalMsgs}, Time: ${elapsed}s`
     );
 
-    // ── PHASE 7: RETURN TO LOBBY ────────────────────────────────
-
     console.log('');
-    console.log('--- Phase 7: Return to Lobby ---');
 
-    // Use a temporary socket to emit returnToLobby (game.js socket is module-scoped)
+    // ── PHASE 5: RETURN TO LOBBY ────────────────────────────────
+    console.log('--- Phase 5: Return to Lobby ---');
+
     await pages[0].evaluate(() => {
       const s = io();
       s.emit('game:returnToLobby');
@@ -329,7 +255,6 @@ async function run() {
       });
     });
 
-    // Host re-joins and verifies fresh lobby
     await pages[0].waitForSelector('#joinPanel', { state: 'attached', timeout: 10000 });
     await pages[0].fill('#nameInput', HUMAN_NAMES[0]);
     await pages[0].click('#joinBtn');
