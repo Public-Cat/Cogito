@@ -14,7 +14,7 @@
 - **Backend**: Express + Socket.IO. No other framework.
 - **Frontend**: Vanilla HTML/CSS/JS in `client/`, served as static files. No build tools, bundlers, or frameworks.
 - **No TypeScript, no database, no ORM.** All game state in memory.
-- **`/api/models`** Express endpoint proxies `OllamaClient.getModels()` for the lobby.
+- **`/api/models`** and **`/api/rules`** Express endpoints for lobby.
 
 ## Commands
 | Command | What |
@@ -72,7 +72,17 @@ All players (humans + AIs) write simultaneously during SUBMITTING phase (15s). A
 Full `game:state` emitted after every state transition (for reconnection support). `game:newMessage` is emitted in batch at start of REVEALING phase, not per-message in real-time.
 
 ## References
-- **`DEVELOPMENT.md`** — comprehensive architecture reference. Has been reconciled with the current codebase. Use alongside AGENTS.md for deeper context.
+- **`DEVELOPMENT.md`** — comprehensive architecture reference (partially stale: file tree lists nonexistent `client/assets/sounds/`). Use alongside AGENTS.md.
+
+## v0.2.0 testing loop — bugs found & fixed
+
+| # | Bug | Files changed |
+|---|---|---|
+| 1 | `updateUI()` hides `votingOverlay` on every `game:state`, including VOTING, undoing `game:voteStart` overlay show | `client/js/game.js:144` |
+| 2 | `GameManager.reset()` orphaned old session timers → events leaked into new session | `server/game/GameManager.js:23`, `server/game/GameSession.js:21` |
+| 3 | Lobby `disconnect` handler didn't broadcast `lobby:state` to remaining players | `server/socket/handlers.js:183` |
+| 4 | `game:rejoin` only emitted to rejoining socket, not all players | `server/socket/handlers.js:163` |
+| 5 | Shared localStorage `myId` → multi-tab collision on navigation | `client/js/lobby.js:23`, `client/js/game.js:6` |
 
 ## Key conventions
 - **Validation**: Player names `/^[a-zA-Z0-9 ]{1,20}$/`, messages ≤500 chars, both HTML-sanitized. All handlers wrapped in try/catch.
@@ -98,4 +108,4 @@ Full `game:state` emitted after every state transition (for reconnection support
 - `node:20-alpine`, `npm ci --omit=dev`, `EXPOSE 3000`
 - Binds `192.168.1.32:3000:3000` (specific IP), custom bridge `cogito-net`
 - Security: `cap_drop: ALL`, `no-new-privileges:true`
-- `.dockerignore` excludes `node_modules/`, `.git/`, `tmp/`, `*.md`, `.gitignore`, `.dockerignore`
+- `.dockerignore` excludes `*.md` — `RULES.md` won't be present in the image, so `GET /api/rules` returns fallback text in Docker.
