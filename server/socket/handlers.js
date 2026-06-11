@@ -101,13 +101,6 @@ export function registerHandlers(io, socket) {
       };
 
       if (typeof callback === 'function') callback({ ok: true });
-
-      setTimeout(() => {
-        const firstPlayer = session.turnOrder[0];
-        if (firstPlayer && !firstPlayer.isHuman) {
-          session.handleTurn();
-        }
-      }, 500);
     } catch (err) {
       console.error('lobby:start error:', err);
       socket.emit('error', { message: 'Failed to start game.' });
@@ -132,29 +125,14 @@ export function registerHandlers(io, socket) {
         return;
       }
 
-      if (session.state !== 'PLAYING') {
-        socket.emit('error', { message: 'Not in playing phase.' });
-        return;
-      }
-
-      const currentPlayer = session.turnOrder[session.currentTurnIndex];
-      if (!currentPlayer || currentPlayer.id !== player.id) {
-        socket.emit('error', { message: 'It is not your turn.' });
-        return;
-      }
-
       const sanitizedText = sanitize(text.trim());
-      const message = {
-        playerId: player.id,
-        playerName: player.name,
-        text: sanitizedText,
-        timestamp: Date.now(),
-      };
-      session.messages.push(message);
-      console.log(`[HUMAN] ${player.name} wrote: "${sanitizedText}"`);
-      io.emit('game:newMessage', message);
+      const submitted = session.handleHumanSubmit(player, sanitizedText);
+      if (!submitted) {
+        socket.emit('error', { message: 'Cannot submit right now.' });
+        return;
+      }
 
-      session.advanceTurn();
+      console.log(`[HUMAN] ${player.name} submitted: "${sanitizedText}"`);
     } catch (err) {
       console.error('game:sendMessage error:', err);
       socket.emit('error', { message: 'Failed to send message.' });
@@ -197,13 +175,6 @@ export function registerHandlers(io, socket) {
       player.isDisconnected = false;
       player.isActive = true;
       console.log(`[HUMAN] Player "${player.name}" reconnected`);
-      if (currentSession.state === 'PLAYING') {
-        const currentPlayer = currentSession.turnOrder[currentSession.currentTurnIndex];
-        if (currentPlayer && currentPlayer.isDisconnected) {
-          currentSession.advanceTurn();
-        }
-      }
-      currentSession.emitGameState();
       const gameState = currentSession.getGameState();
       socket.emit('game:state', { ...gameState, myId: player.id });
     } catch (err) {
