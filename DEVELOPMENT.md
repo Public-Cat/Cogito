@@ -1,6 +1,6 @@
-# 🛠️ DEVELOPMENT.md — Coding Agent Instructions
+# 🛠️ DEVELOPMENT.md — Architecture & Implementation Notes
 
-This document is the authoritative guide for the coding agent implementing Cogito. Read it entirely before writing a single line of code. Follow every instruction precisely.
+This document describes the Cogito architecture and implementation details. For the current agent workflow and gotchas, see `AGENTS.md`.
 
 ---
 
@@ -44,7 +44,7 @@ cogito-game/
 │   ├── index.js                  # Express app setup, Socket.IO init, static file serving
 │   ├── game/
 │   │   ├── GameManager.js        # Singleton: manages the one active game session
-│   │   ├── GameSession.js        # Game state machine (lobby → playing → voting → ended)
+│   │   ├── GameSession.js        # Game state machine (SUBMITTING/REVEALING/VOTING phases)
 │   │   ├── Player.js             # Player model (human or AI)
 │   │   └── topics.js             # Array of discussion topics
 │   ├── ollama/
@@ -84,55 +84,53 @@ cogito-game/
 
 - The server maintains **one game session at a time**, managed by `GameManager.js`.
 - `GameManager` is a singleton module-level object. It holds a reference to the current `GameSession` instance (or `null` if no game is active).
-- When a game ends and all players return to the lobby, `GameManager` resets and is ready for a new session.
+- When a game ends and all players return to the lobby, `GameManager` resets (`this.currentSession = null; this.playerCounter = 0`).
 
 ### Host Assignment
 
-- The **first human** to connect (via Socket.IO) is assigned as Host.
-- Host status is tracked server-side in `GameSession` and in `GameManager` (for pre-session assignment).
-- If the Host disconnects **during the lobby**, the next connected human is promoted to Host. Emit a `host:assigned` event to the new host's socket.
-- If the Host disconnects **during the game**, they are treated as any other disconnected player. No host promotion during gameplay.
-- The server sends `isHost: true/false` to each client on connection and on host reassignment.
+Covered in section 3 of AGENTS.md. TL;DR: First human to connect is host. Lobby disconnect → reassign. Game disconnect → no reassign.
 
-### Socket.IO Events
+### Socket Events
 
-Define and implement these events precisely. Do not rename them.
-
-#### Client → Server
-
-| Event | Payload | Description |
-|---|---|---|
-| `lobby:setName` | `{ name: string }` | Human player sets their display name |
-| `lobby:start` | — | Host starts the game |
-| `game:sendMessage` | `{ text: string }` | Player sends their turn message |
-| *(removed)* | — | Humans no longer vote — only AIs vote |
-| `game:returnToLobby` | — | Player confirms they saw the end screen |
-
-#### Server → Client
-
-| Event | Payload | Description |
-|---|---|---|
-| `lobby:state` | `{ players: Player[], isHost: bool, models: string[] }` | Full lobby state snapshot |
-| `host:assigned` | — | Sent to the new host socket only |
-| `game:state` | `{ players, messages, round, phase, turnOrder, currentTurn }` | Full game state snapshot |
-| `game:newMessage` | `{ playerId, playerName, text, timestamp }` | A new chat message |
-| `game:voteStart` | `{ roundNumber }` | Voting phase has begun |
-| `game:voteResult` | `{ eliminated: Player\|null }` | Vote resolution (single eliminated player) |
-| `game:ended` | `{ winner: 'humans'\|'ais', players: Player[] }` | Game over |
-| `error` | `{ message: string }` | Server-side error to display to client |
+See `AGENTS.md` for the current socket event reference — it is the authoritative source.
 
 ### Game State Machine
 
-`GameSession` has these states. Transitions are enforced server-side:
-
 ```
-LOBBY → PLAYING → VOTING → PLAYING (loop) → ENDED
+LOBBY → SUBMITTING (15s) → REVEALING (10s) → loop (round<2) → VOTING_SOON (5s) → VOTING (10s) → (3s delay) → SUBMITTING or ENDED
 ```
 
-- **LOBBY**: Players joining, host configuring. No messages.
-- **PLAYING**: Round-robin messages. After each full round, check if we've hit round 2 yet. If yes, transition to VOTING after the last player's message.
-- **VOTING**: Only AIs vote (via Ollama API calls, made server-side). Humans are spectators. Once all AI votes collected (or 10s timeout), resolve, emit `game:voteResult`, check win condition. If game continues, transition to PLAYING.
-- **ENDED**: Emit `game:ended`. Wait for all clients to confirm `game:returnToLobby`, then reset `GameManager`.
+States are constants in `GameSession.js`:
+```js
+const STATES = { LOBBY, SUBMITTING, REVEALING, VOTING_SOON, VOTING, ENDED };
+```
+
+- **LOBBY**: Players joining, host configuring.
+- **SUBMITTING**: All active players write simultaneously (15s timer). Humans type in UI; AIs generate via `generateAIMessage()` in parallel. `pendingMessages` collected until all submit or timer expires. Early resolve if all submit before timer.
+- **REVEALING**: `pendingMessages` broadcast via `game:newMessage` and appended to `this.messages` (10s timer). Round counter increments.
+- **Round 2+ check**: After REVEALING, if `round >= 2`, transition to `VOTING_SOON`. Otherwise, loop back to SUBMITTING.
+- **VOTING_SOON**: 5-second warning. Emits `game:votingSoon`.
+- **VOTING**: AI-only votes via Ollama (`collectAIVotes()`). `Promise.allSettled` with 10s timeout. Majority eliminates; ties eliminate no one. Emit `game:voteResult`. 3-second `setTimeout` then `checkWinCondition()`.
+- **ENDED**: Emit `game:ended`. Players call `game:returnToLobby` → `GameManager.reset()`.
+
+### emitToAll / emitToSocket
+
+Set by the `lobby:start` handler after `session.startGame()` returns — not available to `GameSession` before that:
+
+```js
+session.emitToAll = (event, data) => { io.emit(event, data); };
+session.emitToSocket = (socketId, event, data) => { io.to(socketId).emit(event, data); };
+```
+
+The initial `game:state` is emitted directly via `io.to(p.socketId).emit()` in the handler, not through `GameSession`.
+
+### Game State & Reconnection
+
+- All game state lives in `GameSession.js`. Never in socket handlers.
+- `getGameState()` returns the full snapshot with `submittedBy[]`, `activePlayerCount`, `phase`, etc.
+- `game:state` emitted after **every state transition** (`emitGameState()` sends per-player with `myId`).
+- Reconnection via `game:rejoin({ playerId })`: updates `socketId`, clears `isDisconnected`, emits fresh `game:state`.
+- AI name generation at game start (`startGame()`): duplicates retried up to 10 times, fallback `AI-xxxx`.
 
 ---
 
@@ -141,50 +139,60 @@ LOBBY → PLAYING → VOTING → PLAYING (loop) → ENDED
 ### Name Generation
 
 When the host presses START, before the first round begins, for each AI player:
-1. Call Ollama `/api/chat` with a short prompt instructing the model to respond with only a realistic human first name.
+1. Call Ollama `/api/chat` with `buildNamePrompt()` (a one-shot prompt asking for a single human first name).
 2. Strip any extra text from the response. Use the name as the AI player's display name.
-3. Ensure no two AI players share the same name. Retry if a duplicate is generated.
+3. Ensure no two AI players share the same name. Retry if a duplicate is generated (up to 10 tries).
+4. If all attempts fail, fall back to `AI-xxxx` (random hex).
 
-### Conversational Memory (Per-AI Persistent History)
+### System Prompt Initialization
 
-Each AI player maintains a **persistent message history array** (`player.messageHistory`) that lives on the `Player` instance for the entire game. This is the array passed directly to Ollama's `/api/chat` each turn — Ollama uses it to maintain contextual memory without needing a full chat dump.
+After name generation, each AI player's `messageHistory` is initialized with the system prompt:
 
-Lifecycle:
-1. **At game start**, each AI player's history is initialized with a single system message:
-   ```js
-   player.messageHistory = [
-     { role: "system", content: buildSystemPrompt(playerName, topic, allPlayerNames) }
-   ];
+```js
+ai.messageHistory = [
+  { role: "system", content: buildSystemPrompt(ai.name, topic, allPlayerNames) }
+];
+```
+
+The system prompt frames AIs as AIs in a group chat where **humans are the impostors** pretending to be AIs. AIs must find and vote out the humans. The system prompt enforces a casual, short, lowercase style.
+
+### Simultaneous Message Generation (not round-robin)
+
+The game does **not** use round-robin turns. All AIs generate messages simultaneously during the SUBMITTING phase:
+
+1. `startSubmitPhase()` iterates over all active AIs and calls `generateAIMessage(ai)` in parallel (no `await` — they run concurrently).
+2. `generateAIMessage(ai)` does:
+   - Creates a temporary messages array: `[...ai.messageHistory, { role: 'user', content: buildTurnPrompt() }]`
+   - Calls `chat(ai.model, messages)` — note the turn prompt is NOT appended to history before the call (avoids mutation on failure).
+   - On success: pushes `{ role: "user", content: buildTurnPrompt() }` then `{ role: "assistant", content: reply }` to `ai.messageHistory`.
+   - Adds the reply to `pendingMessages` and marks the AI as submitted.
+3. If all active players (humans + AIs) submit before the 15s timer, `resolveSubmitPhase()` fires early.
+
+### Round Transcript Appending
+
+In `resolveSubmitPhase()`:
+1. For each active AI, build a transcript of **other players' messages** (excluding the AI's own message) from `pendingMessages`:
    ```
-2. **After every round** (once all players have sent their message), append that round's messages to every AI player's history as a single `user` turn, formatted as a readable transcript:
+   [PlayerName]: their message
    ```
-   [PlayerA]: their message
-   [PlayerB]: their message
-   [PlayerC]: their message
-   ```
-   This keeps the history compact — one `user` entry per round, not one per message.
-3. **When it is an AI player's turn to speak**, append a `user` prompt like `"It is your turn to respond."` to their history, call `/api/chat` with the full `player.messageHistory`, then append the model's reply as an `assistant` entry to their history.
-4. **Do not** rebuild or replay the entire chat log each turn. The history grows naturally and Ollama retains context across turns.
-
-### Turn Generation
-
-When it is an AI player's turn:
-1. Append the latest round transcript to `player.messageHistory` (as described above).
-2. Append `{ role: "user", content: "It is your turn to respond." }` to `player.messageHistory`.
-3. Call `/api/chat` with `stream: false`, passing `player.messageHistory` as the `messages` array.
-4. Append the model's reply as `{ role: "assistant", content: reply }` to `player.messageHistory`.
-5. Emit the response as `game:newMessage` to all clients.
+2. Push the transcript as a single `{ role: "user", content: transcript }` entry to the AI's `messageHistory`.
+3. This keeps history compact — one `user` entry per round of others' messages.
+4. All `pendingMessages` are then moved to the main `this.messages` array and emitted via `game:newMessage`.
 
 ### Voting
 
-When the voting phase begins:
-1. For each AI player, append a `user` message to their `player.messageHistory` containing the voting prompt (from `buildVotePrompt()`), which instructs the model to vote for the player it believes is most likely human.
-2. The prompt must instruct the model to respond with **only the exact player name** — nothing else.
-3. Call `/api/chat` with the player's existing `player.messageHistory` — do not rebuild history from scratch. The model already has full context from the game.
-4. Append the model's vote response as `{ role: "assistant", content: reply }` to their history.
-5. Parse the response, match it against the active player list (case-insensitive), and record the vote.
-6. If the response cannot be matched to a valid active player, the AI's vote is considered **abstained** (not counted).
-7. All AI votes are collected in parallel (use `Promise.all`).
+When the voting phase begins (`startVoting()`):
+1. `collectAIVotes()` iterates over all active AIs and calls Ollama in parallel (`Promise.allSettled`).
+2. For each AI:
+   - Build the vote prompt via `buildVotePrompt(activePlayerNames)`.
+   - Push `{ role: "user", content: votePrompt }` to `ai.messageHistory`.
+   - Call `chat(ai.model, ai.messageHistory)`.
+   - Push the model's reply as `{ role: "assistant", content: reply }` to history.
+   - Parse the reply: case-insensitive fuzzy `includes()` match against active player names, sorted **longest-name-first** to avoid partial-name collisions (e.g. "Alex" matching "Alexander").
+   - If matched, record vote `(ai.id → target.id)` in `this.aiVotes` Map. Otherwise, abstain.
+3. Once all AI votes are collected (or 10s timeout fires), call `tryResolveVotes()` → `resolveVotes()`.
+4. `resolveVotes()` counts votes by target ID. Majority vote eliminates (single target with max votes). Ties eliminate no one.
+5. Emit `game:voteResult`. After a 3-second `setTimeout`, call `checkWinCondition()`.
 
 ### Prompts
 
@@ -192,9 +200,15 @@ All prompts live in `server/ollama/prompts.js`. No prompt strings should appear 
 
 ```js
 export function buildSystemPrompt(playerName, topic, allPlayerNames) { ... }
-export function buildVotePrompt(playerName, activePlayerNames) { ... }
+export function buildTurnPrompt() { ... }
+export function buildVotePrompt(activePlayerNames) { ... }
 export function buildNamePrompt() { ... }
 ```
+
+- `buildSystemPrompt`: Establishes the AI's identity, the premise (humans are impostors), and stylistic rules (short, lowercase, no markdown).
+- `buildTurnPrompt`: Simple prompt: "Keep the conversation going. React to what others said and stay on topic. Keep it short."
+- `buildVotePrompt`: Asks the AI to vote for the player who seemed most human, lists active players, instructs reply with only a name.
+- `buildNamePrompt`: One-shot prompt for a single common human first name.
 
 ---
 
@@ -234,9 +248,9 @@ The visual design must feel like a **1990s hacker terminal** inspired by The Mat
 **Typing animation (universal — applies to ALL messages):**
 - Every message that appears in the chat — human or AI — is rendered **character by character** with a random delay between each character (10–40ms), simulating live terminal typing. This applies to all clients who did not author the message.
 - **Exception**: the player who sent a message sees their own message appear instantly (they already typed it). All other clients see the typing animation.
-- This is implemented by the server emitting `game:newMessage` to **all clients including the sender**, but the sender's client checks `message.playerId === myPlayerId` and skips the animation for their own messages only.
+- This is implemented by checking `msg.playerId !== myId` client-side before animating.
 - This ensures no client can distinguish human from AI messages by animation behavior.
-- Add a faint `>` prefix to all messages in the terminal style.
+- Messages are prefixed with `[PlayerName] > text`.
 
 ### Sound Effects
 
@@ -268,12 +282,13 @@ Sections (conditionally shown):
 **`game.html` — In-Game Screen**
 
 Layout (terminal window style):
-- **Top bar**: Game topic, current round number, phase indicator (DISCUSSION / VOTING).
-- **Chat area**: Scrollable message history. Each message: `[PlayerName] > message text`. Eliminated players' messages are visually dimmed (50% opacity). Eliminated players have a `[TERMINATED]` tag next to their name.
-- **Input area**: Text input + SEND button. Disabled when it is not the current player's turn. Shows whose turn it currently is.
-- **Player list sidebar** (desktop) / **collapsible panel** (mobile): Shows all players, their status (active / eliminated), and whose turn it is (highlighted).
-- **Voting overlay**: Full-screen modal that appears during voting phase. Shows a list of active players with VOTE buttons. Human players submit one vote. Countdown timer (30 seconds). After voting or timeout, show "WAITING FOR VOTES..." spinner.
-- **End screen overlay**: Full-screen takeover. Shows WIN or LOSE in giant glitchy text. Lists all players with their true identity revealed. RETURN button.
+- **Top bar**: Game topic, current round number, phase indicator (SUBMITTING / REVEALING / VOTING).
+- **Chat area**: Scrollable message history. Each message: `[PlayerName] > text`. Eliminated players' messages are visually dimmed (50% opacity). Eliminated players have a `[TERMINATED]` tag next to their name.
+- **Input area**: Text input + SEND button. Enabled during SUBMITTING phase (if player hasn't submitted yet). Shows countdown timer and submission status.
+- **Phase indicators**: During SUBMITTING, shows "write your response (Xs)". During REVEALING, shows "reading responses... (Xs)". During VOTING_SOON, shows "voting in Xs...".
+- **Player list sidebar** (desktop) / **collapsible panel** (mobile): Shows all players, their status (active / eliminated / disconnected). Players who have submitted show a checkmark.
+- **Voting overlay**: Full-screen modal that appears during voting phase. Shows "AI players are voting..." with a countdown timer (10 seconds). No vote buttons — AI voting is server-side only. Humans are spectators.
+- **End screen overlay**: Full-screen takeover. Shows "HUMANS WIN", "AIs WIN", or "[NAME] IS THE SOLE SURVIVOR" in large text. Lists all players with their true identity revealed. RETURN button.
 
 ---
 
@@ -282,19 +297,22 @@ Layout (terminal window style):
 ### OllamaClient.js
 
 ```js
-// Implement these methods:
 export async function getModels() { ... }           // GET /api/tags → string[]
 export async function chat(model, messages) { ... } // POST /api/chat → string (assistant reply)
+export function getCachedModels() { ... }           // Returns cached model list
 ```
 
-- `chat()` must handle Ollama errors gracefully. If Ollama is unreachable or returns an error, log the error server-side and return a fallback string like `"..."` so the game is not blocked.
-- Set a **timeout of 30 seconds** on all Ollama requests. If exceeded, return the fallback.
+- `chat()` must handle Ollama errors gracefully. If Ollama is unreachable or returns an error, log the error server-side and return a fallback string `"..."` so the game is not blocked.
+- Set a **timeout of 30 seconds** on chat requests, 5 seconds on model list requests (via `AbortController`).
+- Model list is polled every 30s via `setInterval`, cached in a module-level variable. `getModels()` also refreshes on demand with debounce.
 - The `messages` array passed to `/api/chat` must include the system prompt as the first message with `role: "system"`.
+- Default Ollama URL: `http://192.168.1.30:11434` (configurable via `OLLAMA_BASE_URL`).
 
 ### Docker Network
 
-- In `docker-compose.yml`, add `extra_hosts: ["host.docker.internal:host-gateway"]` to allow the container to reach the host's Ollama instance.
-- The Ollama base URL must be configurable via an environment variable `OLLAMA_BASE_URL` (default: `http://host.docker.internal:11434`).
+- Docker Compose uses a fixed IP binding (`192.168.1.32:3000:3000`), custom bridge network `cogito-net`, `cap_drop: ALL`, and `no-new-privileges:true`.
+- The Ollama base URL must be configurable via `OLLAMA_BASE_URL` (default: `http://192.168.1.30:11434`).
+- No `extra_hosts` / `host.docker.internal` — the default Ollama URL points directly to the LAN IP of the Ollama host.
 
 ---
 
@@ -315,22 +333,30 @@ CMD ["node", "server/index.js"]
 ### docker-compose.yml
 
 ```yaml
-version: '3.9'
 services:
   app:
     build: .
     ports:
-      - "3000:3000"
+      - "192.168.1.32:3000:3000"
     environment:
       - NODE_ENV=production
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_BASE_URL=http://192.168.1.30:11434
       - PORT=3000
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - cogito-net
     restart: unless-stopped
+
+networks:
+  cogito-net:
+    name: cogito-net
+    driver: bridge
 ```
 
-No database. No volumes. No external services other than Ollama.
+No database. No volumes. No external services other than Ollama. The specific IP bindings are for the deployment environment — adjust for your network.
 
 ---
 
@@ -369,13 +395,11 @@ No database. No volumes. No external services other than Ollama.
 
 ### Branching Strategy
 
-Use **GitHub Flow** (simple, linear):
-
 - `main` — always deployable. Protected. No direct commits.
-- `feat/<feature-name>` — feature branches.
-- `fix/<issue>` — bug fix branches.
-
-Merge via pull requests only.
+- All feature branches branch **from `develop`** and merge back to `develop`. Never touch `main`.
+- Use git worktrees for parallel features:
+  `git worktree add -b <branch-name> ./worktrees/<branch-name> develop`
+- `worktrees/` is in `.gitignore`.
 
 ### Commit Message Format
 
@@ -391,10 +415,10 @@ Types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `test`
 
 Examples:
 ```
-feat(game): implement round-robin turn order
+feat(game): implement simultaneous submit/reveal phases
 fix(ollama): handle timeout on chat API call
-chore(docker): add host-gateway extra_hosts config
-docs(readme): update quick start instructions
+chore(docker): bind to specific IP for deployment
+docs(readme): update game flow description
 ```
 
 ### What to Commit
@@ -417,7 +441,7 @@ The agent must implement features in this order. Do not skip ahead. Verify each 
 - [ ] Verify: `docker compose up` serves both pages
 
 ### Phase 2 — Ollama Integration
-- [ ] `server/ollama/OllamaClient.js` — `getModels()` and `chat()`
+- [ ] `server/ollama/OllamaClient.js` — `getModels()`, `getCachedModels()`, and `chat()`
 - [ ] `server/ollama/prompts.js` — all prompt builder functions
 - [ ] REST endpoint `GET /api/models` on the Express server (calls `getModels()`)
 - [ ] Verify: hitting `/api/models` returns the list of local Ollama models
@@ -427,38 +451,36 @@ The agent must implement features in this order. Do not skip ahead. Verify each 
 - [ ] `server/game/GameManager.js` — singleton session manager
 - [ ] `server/game/GameSession.js` — LOBBY state, player list, host assignment
 - [ ] `server/game/topics.js` — topic list
-- [ ] `server/socket/handlers.js` — `lobby:setName`, `lobby:configure`, `lobby:start` events
+- [ ] `server/socket/handlers.js` — `lobby:setName`, `lobby:start` events
 - [ ] `client/js/lobby.js` — join form, host config panel, player list, model dropdowns
 - [ ] Matrix CSS — full theme applied to lobby screen
 - [ ] Verify: two browser tabs can join, one is host, host can configure AI players, start button works
 
 ### Phase 4 — Game Loop
-- [ ] `GameSession.js` — PLAYING state, round-robin turns, message storage
-- [ ] Socket handlers — `game:sendMessage`, AI turn triggering
-- [ ] `client/js/game.js` — chat display, turn indicator, input gating
-- [ ] Typing animation for AI messages
-- [ ] Verify: full round-robin works with humans and AIs taking turns
+- [ ] `GameSession.js` — SUBMITTING/REVEALING states, simultaneous AI generation, message storage
+- [ ] Socket handlers — `game:sendMessage`, AI batch triggering
+- [ ] `client/js/game.js` — chat display, submit input gating, countdown timers
+- [ ] Typing animation for all messages (sender skips animation)
+- [ ] Verify: simultaneous submit works — humans type while AIs generate, all revealed together
 
 ### Phase 5 — Voting
-- [ ] `GameSession.js` — VOTING state, AI vote collection, human vote collection, resolution
-- [x] Socket handlers — `game:vote` (removed — humans no longer vote)
-- [ ] `client/js/game.js` — voting overlay, countdown timer
-- [ ] Verify: voting resolves correctly, reveal shows, game continues
+- [ ] `GameSession.js` — VOTING_SOON/VOTING states, AI-only vote collection via Ollama, resolution
+- [ ] `client/js/game.js` — voting overlay (spectator mode), countdown timer
+- [ ] Verify: voting resolves correctly, tie handling works, reveal shows
 
 ### Phase 6 — Win / Loss & Reset
 - [ ] `GameSession.js` — ENDED state, win condition checks
-- [ ] End screen overlay in `game.html`
+- [ ] End screen overlay in `game.html` (solo survivor / humans win / AIs win)
 - [ ] `game:returnToLobby` handler and `GameManager` reset
 - [ ] Verify: both win and lose paths work and return to lobby
 
 ### Phase 7 — Polish
 - [ ] Matrix rain canvas (`matrixRain.js`)
 - [ ] Scanline overlay, flicker animations, glow effects
-- [ ] Sound effects via Web Audio API (`sfx.js`)
-- [ ] Mobile responsiveness (collapsible player list, touch-friendly vote buttons)
-- [ ] Host disconnection → host reassignment
-- [ ] Player disconnection handling mid-game
-- [ ] Edge case: all AIs on a voting tie
+- [ ] Sound effects via Web Audio API (`sfx.js`) — programmatic, no audio files
+- [ ] Mobile responsiveness (collapsible player list)
+- [ ] Host disconnection → host reassignment (lobby only)
+- [ ] Player disconnection and reconnection mid-game (`game:rejoin`)
 
 ---
 
@@ -485,11 +507,11 @@ No test framework is required for this project. Manual testing per phase is suff
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `3000` | HTTP port the server listens on |
-| `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | Base URL for the Ollama API |
+| `OLLAMA_BASE_URL` | `http://192.168.1.30:11434` | Base URL for the Ollama API |
 | `NODE_ENV` | `development` | Set to `production` in Docker |
 
 Read via `process.env` in `server/index.js`. No `.env` file is required — defaults are hardcoded as fallbacks.
 
 ---
 
-*This document is the single source of truth for the coding agent. When in doubt, prefer simplicity, prefer server-side logic, and prefer the Matrix aesthetic.*
+*For agent workflow, commands, and up-to-date gotchas, see `AGENTS.md`.*

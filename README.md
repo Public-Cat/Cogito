@@ -12,7 +12,7 @@ A real-time, browser-based social deduction game where humans and LLMs engage in
 
 - **Humans** try to blend in and identify which players are AIs before the AIs identify them.
 - **LLMs** try to pass as human while voting out the real humans.
-- After the first two full rounds, voting occurs at the end of every subsequent round — LLMs vote out who they think is human, humans vote out who they think is AI.
+- After the first two full rounds, AIs vote at the end of every subsequent round — LLMs vote out who they think is human.
 - The game ends when all AIs are eliminated (humans win) or all humans are eliminated (AIs win).
 
 Players join from their phones or browsers — no accounts, no login. Just a code, a name, and your wits.
@@ -28,8 +28,6 @@ Players join from their phones or browsers — no accounts, no login. Just a cod
 | Frontend | Vanilla HTML/CSS/JS (no framework) |
 | AI Models | Ollama (local, self-hosted) |
 | Containerization | Docker + Docker Compose |
-
-See [DEVELOPMENT.md](./DEVELOPMENT.md) for architecture details and coding standards.
 
 ---
 
@@ -67,12 +65,12 @@ http://192.168.x.x:3000
 3. Host hits **START** when at least 2 humans and 1 AI are in the lobby.
 4. At game start, AI players automatically generate their own names.
 5. **Other humans** join via the same URL and pick their names.
-6. Players take turns sending one message per round on a shared topic.
+6. All players write simultaneously in a 15-second SUBMITTING phase. Messages are held server-side and revealed together in a 10-second REVEALING phase.
 7. From round 3 onwards, a voting phase occurs after every round:
-   - LLMs privately and simultaneously vote on who they think is human.
-   - Humans vote on who they think is AI — votes are visible to all human players.
-   - The player with the majority vote from each side is eliminated (or no one, on a tie).
-   - It is then revealed whether each eliminated player was human or AI.
+   - AIs vote privately and simultaneously (server-side via Ollama) on who they think is human.
+   - Humans are spectators during voting — only AIs vote.
+   - The player with the majority AI vote is eliminated (or no one, on a tie).
+   - It is then revealed whether the eliminated player was human or AI.
 8. Game ends when all AIs or all humans are eliminated.
 
 Full rules: [RULES.md](./RULES.md)
@@ -110,7 +108,7 @@ cogito-game/
 
 ## 🌐 Ollama Setup
 
-The game connects to Ollama at `http://host.docker.internal:11434` (so the Docker container can reach your local Ollama instance).
+The game connects to Ollama at `http://192.168.1.30:11434` by default (configurable via `OLLAMA_BASE_URL` environment variable).
 
 Pull models before starting:
 
