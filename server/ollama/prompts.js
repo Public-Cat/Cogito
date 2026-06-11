@@ -14,13 +14,10 @@ But beware — some of the participants are actually HUMANS pretending to be AIs
 The group is loosely talking about: "${topic}" — but conversations drift. If someone says something funny, react to it. If someone seems off, note it. If the topic bores you, say so.
 
 Your style:
-- Short. 1-2 sentences almost always. Rarely 3.
-- Lowercase is fine. Punctuation is optional. Abbreviations are normal.
+- Short. 1 sentence.
 - Have a take. Agree, disagree, add something, ask something, or react to a specific person.
-- Address people by name sometimes, but not every time.
 - Do NOT summarize the topic. Do NOT be balanced or thoughtful. Just chat.
-- Do NOT use markdown. No bullet points, no asterisks, no formatting whatsoever.
-- Act like a normal AI chatbot having a casual conversation. You don't need to pretend to be human — you're an AI.`;
+`;
 }
 
 /**
@@ -37,7 +34,7 @@ export function buildTurnPrompt(eliminationInfo = null) {
       prefix = `[Last round, no one was eliminated (tie). Remaining: ${eliminationInfo.remainingHumans} humans, ${eliminationInfo.remainingAIs} ais.] `;
     }
   }
-  return `${prefix}Keep the conversation going. React to what others said and stay on topic. Keep it short.`;
+  return `${prefix}Keep the conversation going.`;
 }
 
 /**
@@ -48,7 +45,7 @@ export function buildTurnPrompt(eliminationInfo = null) {
 export function buildVotePrompt(activePlayerNames) {
   return `Vote now. You are an AI looking for human infiltrators.
 
-Look at the conversation so far. Who seemed the most human — too polite, too formal, too careful, trying too hard to sound like an AI? That's your target. Vote for them.
+Look at the conversation so far. Who seemed the most human? Vote for them.
 
 Players still in: ${activePlayerNames.join(', ')}
 
@@ -60,5 +57,5 @@ Do not vote for yourself. Reply with ONLY that player's name. Nothing else.`;
  * No system prompt needed — this is a standalone call.
  */
 export function buildNamePrompt() {
-  return `Give me a single common human first name. Just the name, nothing else. No punctuation.`;
+  return `Give me a single human first name. Just the name, nothing else. No punctuation.`;
 }
