@@ -9,10 +9,11 @@
 - **Conventional Commits** (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`).
 
 ## Stack
-- **Runtime**: Node.js v20+, ES Modules (`"type": "module"`). No `.cjs`/`.mjs`.
+- **Runtime**: Node.js v20+, ES Modules (`"type": "module"`). No `.cjs`/`.mjs`. `node --watch` requires Node 18+.
 - **Backend**: Express + Socket.IO. No other framework.
 - **Frontend**: Vanilla HTML/CSS/JS in `client/`, served as static files. No build tools, bundlers, or frameworks.
 - **No TypeScript, no database, no ORM.** All game state in memory.
+- **`/api/models`** Express endpoint proxies `OllamaClient.getModels()` for the lobby.
 
 ## Commands
 | Command | What |
@@ -35,6 +36,8 @@ All tests are plain Node scripts (no framework), exit via `process.exit(0|1)`.
 - Playwright tests need `npm install` (devDeps: `playwright`, `socket.io-client`)
 - Server session is dirty after each test; clean up with `lobby:reset` or `game:returnToLobby`
 
+> ⚠️ **All three socket-level test scripts (`e2e.mjs`, `full-game.mjs`, `rejoin.mjs`) are broken.** They reference a `PLAYING` phase and `currentTurn` field from the old round-robin architecture. The current game uses simultaneous `SUBMITTING`/`REVEALING` phases. Do not rely on them for validation.
+
 ## Game state machine
 `LOBBY → SUBMITTING (15s) → REVEALING (10s) → SUBMITTING (loop, round<2) → VOTING_SOON (5s) → VOTING (10s) → SUBMITTING (continue) → ... → ENDED`
 
@@ -43,7 +46,7 @@ All players (humans + AIs) write simultaneously during SUBMITTING phase (15s). A
 ## Key files
 | File | Role |
 |---|---|
-| `server/index.js` | Express app, Socket.IO init, static files, `/api/models` |
+| `server/index.js` | Express app, Socket.IO init, static files, `/api/models` (proxies `getModels()`) |
 | `server/game/GameManager.js` | Singleton — `getOrCreateSession()`, `reset()`, `generatePlayerId()` |
 | `server/game/GameSession.js` | State machine, submit/reveal phases, AI vote resolution, win conditions |
 | `server/game/Player.js` | Player model (isHuman, isEliminated, isDisconnected, messageHistory[], lastMessageIndex, model) |
@@ -64,14 +67,19 @@ All players (humans + AIs) write simultaneously during SUBMITTING phase (15s). A
 - `game:rejoin({ playerId })` — reconnect mid-game
 
 **Server→Client:**
-- `lobby:state`, `host:assigned`, `game:state` (+ `myId`, `submittedBy[]`, `activePlayerCount`), `game:newMessage`, `game:votingSoon` (`{ delay: 5 }`), `game:voteStart`, `game:voteResult` (`{ eliminated: {id,name,isHuman}|null }`), `game:ended` (`{ winner, players[] }`), `error`
+- `lobby:state`, `host:assigned`, `game:state` (+ `myId`, `submittedBy[]`, `activePlayerCount`), `game:newMessage`, `game:votingSoon` (`{ delay: 5 }`), `game:voteStart`, `game:voteResult` (`{ eliminated: {id,name,isHuman}|null }`), `game:ended` (`{ winner: 'humans'|'ais'|'solo', players[], winnerPlayerId?, winnerPlayerName? }`), `error`
 
 Full `game:state` emitted after every state transition (for reconnection support). `game:newMessage` is emitted in batch at start of REVEALING phase, not per-message in real-time.
+
+## Stale sources (don't trust them)
+- **`DEVELOPMENT.md`** — describes a round-robin/PLAYING/voting architecture that **no longer exists**. The current game uses simultaneous SUBMITTING → REVEALING → VOTING_SOON → VOTING phases. Ignore everything in that file about turn order, human voting, and state names.
+- **Tests `e2e.mjs`, `full-game.mjs`, `rejoin.mjs`** — all reference `PLAYING` phase and `currentTurn` from the old architecture. They will fail against the current code. Do not use them for validation.
 
 ## Key conventions
 - **Validation**: Player names `/^[a-zA-Z0-9 ]{1,20}$/`, messages ≤500 chars, both HTML-sanitized. All handlers wrapped in try/catch.
 - **Game state** lives only in `GameSession.js` — never in socket handlers.
-- **All prompts** in `server/ollama/prompts.js` — never inline.
+- **`emitToAll` / `emitToSocket`** are set by `lobby:start` handler. `GameSession` cannot emit before `startGame()` is called.
+- **All prompts** in `server/ollama/prompts.js` — never inline. Exports: `buildSystemPrompt`, `buildTurnPrompt`, `buildVotePrompt`, `buildNamePrompt`.
 - **AI memory**: `messageHistory[]` per AI player, round transcripts appended in `resolveSubmitPhase` (filtered to exclude AI's own messages), `lastMessageIndex` prevents resends. `model` field on Player stores which Ollama model they use.
 - **AI name generation**: At game start via `buildNamePrompt()`, retries on duplicates (up to 10 tries), fallback to `AI-xxxx`.
 - **AI vote parsing**: Fuzzy case-insensitive `includes()` match against player names, sorted longest-first to avoid partial-name collisions.

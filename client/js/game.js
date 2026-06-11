@@ -334,7 +334,10 @@ function showEndScreen(data) {
   document.getElementById('eliminationOverlay').style.display = 'none';
   document.getElementById('endOverlay').style.display = 'flex';
   const title = document.getElementById('endTitle');
-  if (data.winner === 'humans') {
+  if (data.winner === 'solo') {
+    title.textContent = `> ${data.winnerPlayerName} IS THE SOLE SURVIVOR`;
+    title.style.color = 'var(--color-primary)';
+  } else if (data.winner === 'humans') {
     title.textContent = '> HUMANS WIN';
     title.style.color = 'var(--color-primary)';
   } else {
@@ -424,7 +427,7 @@ socket.on('game:voteResult', (result) => {
 });
 
 socket.on('game:ended', (data) => {
-  if (data.winner === 'humans') {
+  if (data.winner === 'humans' || data.winner === 'solo') {
     playWin();
   } else {
     playLose();

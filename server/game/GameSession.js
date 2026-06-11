@@ -381,13 +381,17 @@ export class GameSession {
   }
 
   checkWinCondition() {
-    const aliveHumans = this.players.filter(p => p.isHuman && !p.isEliminated);
+    const aliveHumans = this.players.filter(p => p.isHuman && !p.isEliminated && !p.isDisconnected);
     const aliveAIs = this.players.filter(p => !p.isHuman && !p.isEliminated);
 
     if (aliveHumans.length === 0) {
       this.endGame('ais');
     } else if (aliveAIs.length === 0) {
-      this.endGame('humans');
+      if (aliveHumans.length === 1) {
+        this.endGame('solo', aliveHumans[0]);
+      } else {
+        this.endGame('humans');
+      }
     } else {
       console.log(`[GAME] No winner yet — continuing (Humans: ${aliveHumans.length}, AIs: ${aliveAIs.length})`);
       this.startSubmitPhase();
@@ -400,16 +404,22 @@ export class GameSession {
     if (this.voteSoonTimer) { clearTimeout(this.voteSoonTimer); this.voteSoonTimer = null; }
   }
 
-  endGame(winner) {
+  endGame(winnerType, winnerPlayer = null) {
+    if (!winnerType) {
+      const result = this.determineWinner();
+      this.endGame(result.type, result.player);
+      return;
+    }
     this.clearTimers();
+    this.state = STATES.ENDED;
+    const winnerStr = winnerType === 'solo' ? `${winnerPlayer.name} (solo)` : winnerType;
+    console.log(`[GAME] Game ended — ${winnerStr} win!`);
     if (this.voteTimeout) {
       clearTimeout(this.voteTimeout);
       this.voteTimeout = null;
     }
-    this.state = STATES.ENDED;
-    console.log(`[GAME] Game ended — ${winner || this.determineWinner()} win!`);
-    this.emitToAll('game:ended', {
-      winner: winner || this.determineWinner(),
+    const payload = {
+      winner: winnerType,
       players: this.players.map(p => ({
         id: p.id,
         name: p.name,
@@ -417,14 +427,22 @@ export class GameSession {
         isEliminated: p.isEliminated,
         model: p.model,
       })),
-    });
+    };
+    if (winnerType === 'solo' && winnerPlayer) {
+      payload.winnerPlayerId = winnerPlayer.id;
+      payload.winnerPlayerName = winnerPlayer.name;
+    }
+    this.emitToAll('game:ended', payload);
   }
 
   determineWinner() {
-    const aliveHumans = this.players.filter(p => p.isHuman && !p.isEliminated);
+    const aliveHumans = this.players.filter(p => p.isHuman && !p.isEliminated && !p.isDisconnected);
     const aliveAIs = this.players.filter(p => !p.isHuman && !p.isEliminated);
-    if (aliveAIs.length === 0) return 'humans';
-    return 'ais';
+    if (aliveAIs.length === 0) {
+      if (aliveHumans.length === 1) return { type: 'solo', player: aliveHumans[0] };
+      return { type: 'humans' };
+    }
+    return { type: 'ais' };
   }
 
   emitGameState() {
