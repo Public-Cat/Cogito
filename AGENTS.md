@@ -9,7 +9,7 @@
 - **Conventional Commits** (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`).
 
 ## Stack
-- **Runtime**: Node.js v20+, ES Modules (`"type": "module"`). No `.cjs`/`.mjs`. `node --watch` requires Node 18+.
+- **Runtime**: Node.js v20+, ES Modules (`"type": "module"` in package.json). App source uses `.js`; test scripts use `.mjs`. `node --watch` requires Node 18+.
 - **Backend**: Express + Socket.IO. No other framework.
 - **Frontend**: Vanilla HTML/CSS/JS in `client/`, served as static files. No build tools, bundlers, or frameworks.
 - **No TypeScript, no database, no ORM.** All game state in memory.
@@ -71,9 +71,9 @@ All players (humans + AIs) write simultaneously during SUBMITTING phase (15s). A
 
 Full `game:state` emitted after every state transition (for reconnection support). `game:newMessage` is emitted in batch at start of REVEALING phase, not per-message in real-time.
 
-## Stale sources (don't trust them)
-- **`DEVELOPMENT.md`** — describes a round-robin/PLAYING/voting architecture that **no longer exists**. The current game uses simultaneous SUBMITTING → REVEALING → VOTING_SOON → VOTING phases. Ignore everything in that file about turn order, human voting, and state names.
-- **Tests `e2e.mjs`, `full-game.mjs`, `rejoin.mjs`** — all reference `PLAYING` phase and `currentTurn` from the old architecture. They will fail against the current code. Do not use them for validation.
+## References
+- **`DEVELOPMENT.md`** — comprehensive architecture reference. Has been reconciled with the current codebase. Use alongside AGENTS.md for deeper context.
+- **Tests `e2e.mjs`, `full-game.mjs`, `rejoin.mjs`** — **do not run.** They reference `PLAYING` phase and `currentTurn` from the old round-robin architecture. The current game uses simultaneous `SUBMITTING`/`REVEALING` phases.
 
 ## Key conventions
 - **Validation**: Player names `/^[a-zA-Z0-9 ]{1,20}$/`, messages ≤500 chars, both HTML-sanitized. All handlers wrapped in try/catch.
