@@ -2,7 +2,7 @@ import { playVote, playEliminated, playWin, playLose } from './sfx.js';
 
 const socket = io();
 
-let myId = sessionStorage.getItem('cogito_myId') || null;
+let myId = localStorage.getItem('cogito_myId') || null;
 let gameState = null;
 let voteSoonCountdown = null;
 let voteSoonInterval = null;
@@ -146,6 +146,11 @@ function renderPlayerList(players, currentTurnId) {
       termTag.textContent = ' [TERMINATED]';
       termTag.style.color = 'var(--color-danger)';
       nameSpan.appendChild(termTag);
+    } else if (p.isDisconnected) {
+      const discTag = document.createElement('span');
+      discTag.textContent = ' [DISCONNECTED]';
+      discTag.style.color = 'var(--color-warning)';
+      nameSpan.appendChild(discTag);
     }
     div.appendChild(nameSpan);
     sidebar.appendChild(div);
