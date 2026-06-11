@@ -78,7 +78,7 @@ Full `game:state` emitted after every state transition (for reconnection support
 ## Key conventions
 - **Validation**: Player names `/^[a-zA-Z0-9 ]{1,20}$/`, messages ≤500 chars, both HTML-sanitized. All handlers wrapped in try/catch.
 - **Game state** lives only in `GameSession.js` — never in socket handlers.
-- **`emitToAll` / `emitToSocket`** are set by `lobby:start` handler *after* the initial `game:state` is emitted directly via `io.to(p.socketId).emit()`. `GameSession` cannot emit before `startGame()` is called.
+- **`emitToAll` / `emitToSocket`** must be set by `lobby:start` handler *before* calling `startGame()`, because `startSubmitPhase()` → `emitGameState()` uses them. If not set, crashes as `emitToSocket is not a function`.
 - **All prompts** in `server/ollama/prompts.js` — never inline. Exports: `buildSystemPrompt`, `buildTurnPrompt`, `buildVotePrompt`, `buildNamePrompt`.
 - **AI memory**: `messageHistory[]` per AI player (system prompt + turn prompts + round transcripts). Round transcripts (others' messages only) appended in `resolveSubmitPhase`. `model` field on Player stores which Ollama model they use. `lastMessageIndex` is set but unused (dead field).
 - **AI name generation**: At game start via `buildNamePrompt()`, retries on duplicates (up to 10 tries), fallback to `AI-xxxx`.
