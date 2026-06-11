@@ -2,7 +2,8 @@ import { playVote, playEliminated, playWin, playLose } from './sfx.js';
 
 const socket = io();
 
-let myId = localStorage.getItem('cogito_myId') || null;
+const urlParams = new URLSearchParams(window.location.search);
+let myId = urlParams.get('myId') || localStorage.getItem('cogito_myId') || null;
 let gameState = null;
 let voteSoonCountdown = null;
 let voteSoonInterval = null;
@@ -140,7 +141,9 @@ function updateUI(state) {
   document.getElementById('phaseDisplay').textContent = state.phase;
 
   document.getElementById('eliminationOverlay').style.display = 'none';
-  document.getElementById('votingOverlay').style.display = 'none';
+  if (state.phase !== 'VOTING') {
+    document.getElementById('votingOverlay').style.display = 'none';
+  }
 
   const input = document.getElementById('msgInput');
   const sendBtn = document.getElementById('sendBtn');

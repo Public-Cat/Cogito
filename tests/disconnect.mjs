@@ -36,12 +36,13 @@ async function main() {
   t("Bob joined, isHost=" + l2.isHost + ", myId=" + l2.myId);
 
   // Alice (host) disconnects
+  // Set up Bob's listener BEFORE emitting to avoid race
+  const bobPromotedPromise = new Promise(r => s2.once("lobby:state", r));
   t("Alice disconnecting from lobby...");
   s1.disconnect();
-  await sleep(300);
 
   // Bob should become host
-  const bobPromoted = await new Promise(r => s2.once("lobby:state", r));
+  const bobPromoted = await bobPromotedPromise;
   t("Bob after Alice left: isHost=" + bobPromoted.isHost + ", players=" + bobPromoted.players.length);
   if (!bobPromoted.isHost) throw new Error("S1 FAIL: Bob should be promoted to host");
   if (bobPromoted.players.length !== 1) throw new Error("S1 FAIL: Should see 1 player (Bob only)");

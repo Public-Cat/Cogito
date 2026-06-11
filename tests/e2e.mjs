@@ -32,6 +32,8 @@ async function main() {
   const socketB = io(BASE);
   await new Promise(r => socketB.on("connect", r));
 
+  // Set up host's listener BEFORE emitting so there's no race
+  const hostUpdatePromise = new Promise(r => socketA.once("lobby:state", r));
   const lobbyB = await new Promise(r => {
     socketB.emit("lobby:setName", { name: "Bob" });
     socketB.once("lobby:state", r);
@@ -40,7 +42,7 @@ async function main() {
   if (lobbyB.isHost) throw new Error("FAIL: Player B should not be host");
 
   // Host gets updated lobby state
-  const hostUpdate = await new Promise(r => socketA.once("lobby:state", r));
+  const hostUpdate = await hostUpdatePromise;
   t("Host sees " + hostUpdate.players.length + " players");
   if (hostUpdate.players.length !== 2) throw new Error("FAIL: Host should see 2 players");
 
