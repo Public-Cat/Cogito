@@ -80,12 +80,13 @@ Full `game:state` emitted after every state transition (for reconnection support
 - **Game state** lives only in `GameSession.js` — never in socket handlers.
 - **`emitToAll` / `emitToSocket`** are set by `lobby:start` handler *after* the initial `game:state` is emitted directly via `io.to(p.socketId).emit()`. `GameSession` cannot emit before `startGame()` is called.
 - **All prompts** in `server/ollama/prompts.js` — never inline. Exports: `buildSystemPrompt`, `buildTurnPrompt`, `buildVotePrompt`, `buildNamePrompt`.
-- **AI memory**: `messageHistory[]` per AI player, round transcripts appended in `resolveSubmitPhase` (filtered to exclude AI's own messages), `lastMessageIndex` prevents resends. `model` field on Player stores which Ollama model they use.
+- **AI memory**: `messageHistory[]` per AI player (system prompt + turn prompts + round transcripts). Round transcripts (others' messages only) appended in `resolveSubmitPhase`. `model` field on Player stores which Ollama model they use. `lastMessageIndex` is set but unused (dead field).
 - **AI name generation**: At game start via `buildNamePrompt()`, retries on duplicates (up to 10 tries), fallback to `AI-xxxx`.
 - **AI vote parsing**: Fuzzy case-insensitive `includes()` match against player names, sorted longest-first to avoid partial-name collisions.
 - **Vote resolution**: AI-only. Majority vote eliminates; ties eliminate no one.
 - **Disconnect**: lobby → removed + host reassigned. Mid-game → `isDisconnected`. In SUBMITTING phase, remaining players may trigger early resolve. Rejoin via `game:rejoin({ playerId })`.
 - **`isDisconnected`** players are excluded from `getActivePlayers()` (treated like eliminated).
+- **AI disconnect asymmetry**: `getActiveAIs()` filters only by `isEliminated` — disconnected AIs still generate messages and vote. Only humans lose active status on disconnect.
 
 ## Ollama
 - Default URL: `http://192.168.1.30:11434` (configurable via `OLLAMA_BASE_URL`)
