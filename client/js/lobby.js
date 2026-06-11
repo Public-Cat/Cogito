@@ -178,20 +178,22 @@ function setupHostPanel(state) {
     slot.style.gap = '8px';
     slot.style.margin = '4px 0';
     const select = document.createElement('select');
-    if (state.models.length === 0) {
-      const opt = document.createElement('option');
-      opt.value = 'llama3';
-      opt.textContent = 'llama3 (default)';
-      select.appendChild(opt);
-    } else {
+    const modelsAvailable = state.models.length > 0;
+    if (modelsAvailable) {
       state.models.forEach(m => {
         const opt = document.createElement('option');
         opt.value = m;
         opt.textContent = m;
         select.appendChild(opt);
       });
+      select.value = model;
+    } else {
+      select.disabled = true;
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '-- no models available --';
+      select.appendChild(opt);
     }
-    select.value = model;
     select.style.flex = '1';
     const removeBtn = document.createElement('button');
     removeBtn.textContent = 'X';
@@ -206,8 +208,25 @@ function setupHostPanel(state) {
   const addAiBtn = document.createElement('button');
   addAiBtn.textContent = '+ ADD AI';
   addAiBtn.style.margin = '4px 0';
+  addAiBtn.disabled = !(state.models.length > 0);
   addAiBtn.addEventListener('click', () => addAiSlot(state.models));
   aiConfigDiv.appendChild(addAiBtn);
+  if (state.models.length === 0) {
+    const existingErr = document.getElementById('aiModelError');
+    if (!existingErr) {
+      const errDiv = document.createElement('div');
+      errDiv.id = 'aiModelError';
+      errDiv.style.color = 'var(--color-warning)';
+      errDiv.style.margin = '8px 0';
+      errDiv.style.padding = '8px';
+      errDiv.style.border = '1px solid var(--color-warning)';
+      errDiv.textContent = '! No Ollama models detected. Make sure Ollama is running.';
+      aiConfigDiv.appendChild(errDiv);
+    }
+  } else {
+    const existingErr = document.getElementById('aiModelError');
+    if (existingErr) existingErr.remove();
+  }
 
   const startBtn = document.getElementById('startBtn');
   updateStartBtn(state);
@@ -226,25 +245,19 @@ function setupHostPanel(state) {
 }
 
 function addAiSlot(models) {
+  if (models.length === 0) return;
   const container = document.getElementById('aiConfig');
   const slot = document.createElement('div');
   slot.style.display = 'flex';
   slot.style.gap = '8px';
   slot.style.margin = '4px 0';
   const select = document.createElement('select');
-  if (models.length === 0) {
+  models.forEach(m => {
     const opt = document.createElement('option');
-    opt.value = 'llama3';
-    opt.textContent = 'llama3 (default)';
+    opt.value = m;
+    opt.textContent = m;
     select.appendChild(opt);
-  } else {
-    models.forEach(m => {
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = m;
-      select.appendChild(opt);
-    });
-  }
+  });
   select.style.flex = '1';
   const removeBtn = document.createElement('button');
   removeBtn.textContent = 'X';
@@ -274,7 +287,8 @@ function updateStartBtn(state) {
   if (!startBtn) return;
   const humans = (state.players || []).filter(p => p.isHuman).length;
   const aiSlots = document.querySelectorAll('#aiConfig select').length;
-  startBtn.disabled = !(humans >= 2 && aiSlots >= 1);
+  const hasValidModel = aiSlots === 0 || Array.from(document.querySelectorAll('#aiConfig select')).some(sel => !sel.disabled);
+  startBtn.disabled = !(humans >= 2 && aiSlots >= 1 && hasValidModel);
 }
 
 function renderPlayerList(players) {
