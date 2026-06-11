@@ -30,6 +30,7 @@ export class GameSession {
     this.voteTimeout = null;
     this.postVoteTimer = null;
     this.aiVotesResolved = false;
+    this.lastElimination = null;
   }
 
   addPlayer(id, isHuman, socketId) {
@@ -195,11 +196,14 @@ export class GameSession {
   }
 
   async generateAIMessage(ai) {
-    const messages = [...ai.messageHistory, { role: 'user', content: buildTurnPrompt() }];
+    const turnPrompt = this.lastElimination
+      ? buildTurnPrompt(this.lastElimination)
+      : buildTurnPrompt();
+    const messages = [...ai.messageHistory, { role: 'user', content: turnPrompt }];
     const reply = await chat(ai.model, messages);
     if (this.state !== STATES.SUBMITTING) return;
 
-    ai.messageHistory.push({ role: 'user', content: buildTurnPrompt() });
+    ai.messageHistory.push({ role: 'user', content: turnPrompt });
     ai.messageHistory.push({ role: 'assistant', content: reply });
 
     const msg = {
@@ -374,8 +378,19 @@ export class GameSession {
       console.log(`[GAME] "${eliminated.name}" eliminated (${type}, votes: ${maxVotes})`);
     }
 
+    const remainingHumans = this.players.filter(p => p.isHuman && !p.isEliminated && !p.isDisconnected).length;
+    const remainingAIs = this.players.filter(p => !p.isHuman && !p.isEliminated).length;
+
+    this.lastElimination = {
+      eliminated: eliminated ? { name: eliminated.name, isHuman: eliminated.isHuman } : null,
+      remainingHumans,
+      remainingAIs,
+    };
+
     this.emitToAll('game:voteResult', {
       eliminated: eliminated ? { id: eliminated.id, name: eliminated.name, isHuman: eliminated.isHuman } : null,
+      remainingHumans,
+      remainingAIs,
     });
 
     this.postVoteTimer = setTimeout(() => this.checkWinCondition(), 3000);

@@ -304,15 +304,20 @@ function showVoteResult(result) {
   const overlay = document.getElementById('eliminationOverlay');
   const content = document.getElementById('eliminationContent');
 
+  const countLine = `remaining: ${result.remainingHumans} humans, ${result.remainingAIs} AIs`;
+
   if (result.eliminated) {
     const p = result.eliminated;
     const type = p.isHuman ? 'HUMAN' : 'AI';
     content.innerHTML = `
       <div style="margin:12px 0;padding:16px 24px;border:1px solid var(--color-danger);color:var(--color-danger);font-size:1.3em;text-align:center;box-shadow:0 0 8px var(--color-danger);">
         > ${p.name} TERMINATED (${type})
-      </div>`;
+      </div>
+      <p style="color:var(--color-text-dim);text-align:center;margin-top:12px;">${countLine}</p>`;
   } else {
-    content.innerHTML = '<p style="color:var(--color-text-dim);font-size:1.2em;">> NO ELIMINATION THIS ROUND</p>';
+    content.innerHTML = `
+      <p style="color:var(--color-text-dim);font-size:1.2em;text-align:center;">> NO ELIMINATION THIS ROUND</p>
+      <p style="color:var(--color-text-dim);text-align:center;margin-top:12px;">${countLine}</p>`;
   }
 
   overlay.style.display = 'flex';
@@ -325,9 +330,9 @@ function showVoteResult(result) {
   if (result.eliminated) {
     const p = result.eliminated;
     const type = p.isHuman ? 'HUMAN' : 'AI';
-    div.innerHTML = `<div style="color:var(--color-warning);">> VOTE RESULT</div><div>Eliminated: ${p.name} (${type})</div>`;
+    div.innerHTML = `<div style="color:var(--color-warning);">> VOTE RESULT</div><div>Eliminated: ${p.name} (${type}) — ${countLine}</div>`;
   } else {
-    div.innerHTML = '<div style="color:var(--color-warning);">> VOTE RESULT</div><div style="color:var(--color-text-dim);">No elimination (tie)</div>';
+    div.innerHTML = `<div style="color:var(--color-warning);">> VOTE RESULT</div><div style="color:var(--color-text-dim);">No elimination (tie) — ${countLine}</div>`;
   }
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;

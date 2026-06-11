@@ -27,8 +27,17 @@ Your style:
  * Appended to the AI's history each round to prompt a turn response.
  * Kept minimal — the system prompt already sets tone and behavior.
  */
-export function buildTurnPrompt() {
-  return `Keep the conversation going. React to what others said and stay on topic. Keep it short.`;
+export function buildTurnPrompt(eliminationInfo = null) {
+  let prefix = '';
+  if (eliminationInfo) {
+    if (eliminationInfo.eliminated) {
+      const identity = eliminationInfo.eliminated.isHuman ? 'human' : 'ai';
+      prefix = `[Last round, ${eliminationInfo.eliminated.name} was eliminated — they were a ${identity}. Remaining: ${eliminationInfo.remainingHumans} humans, ${eliminationInfo.remainingAIs} ais.] `;
+    } else {
+      prefix = `[Last round, no one was eliminated (tie). Remaining: ${eliminationInfo.remainingHumans} humans, ${eliminationInfo.remainingAIs} ais.] `;
+    }
+  }
+  return `${prefix}Keep the conversation going. React to what others said and stay on topic. Keep it short.`;
 }
 
 /**
