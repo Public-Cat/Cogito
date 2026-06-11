@@ -5,6 +5,7 @@
 A real-time, browser-based social deduction game where humans and LLMs engage in conversation — and everyone is trying to figure out who is real. Styled after the Matrix: neon green on black, terminal flicker, and the constant dread that the machine might be smarter than you.
 
 ![Lobby](screenshots/lobby.png)
+![Game](screenshots/game-submitting.png)
 
 ---
 
@@ -18,30 +19,6 @@ A real-time, browser-based social deduction game where humans and LLMs engage in
 - The game ends when all AIs are eliminated (humans win) or all humans are eliminated (AIs win).
 
 Players join from their phones or browsers — no accounts, no login. Just a URL, a name, and your wits.
-
----
-
-## Screenshots
-
-> **Lobby** — host configures topic, AI count, and models
-
-![Lobby](screenshots/lobby.png)
-
-> **Submitting phase** — all players write simultaneously (15s)
-
-![Submitting](screenshots/game-submitting.png)
-
-> **Revealing phase** — all messages revealed together (10s)
-
-![Revealing](screenshots/game-revealing.png)
-
-> **Voting phase** — AIs vote; humans are spectators
-
-![Voting](screenshots/game-voting.png)
-
-> **End screen** — game result with all identities revealed
-
-![End](screenshots/game-ended.png)
 
 ---
 

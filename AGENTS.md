@@ -6,6 +6,7 @@
 - Use git worktrees for parallel features:
   `git worktree add -b <branch-name> ./worktrees/<branch-name> develop`
 - `worktrees/` is in `.gitignore` — created and managed by agents.
+- **When finished, merge back to `develop` and delete the branch.** Fetch/rebase first — `develop` may have moved since you branched.
 - **Conventional Commits** (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`).
 
 ## Stack
@@ -45,7 +46,7 @@ All players (humans + AIs) write simultaneously during SUBMITTING phase (15s). A
 ## Key files
 | File | Role |
 |---|---|
-| `server/index.js` | Express app, Socket.IO init, static files, `/api/models` (proxies `getModels()`) |
+| `server/index.js` | Express app, Socket.IO init, static files, `/api/models`, `/api/rules` (serves RULES.md) |
 | `server/game/GameManager.js` | Singleton — `getOrCreateSession()`, `reset()`, `generatePlayerId()` |
 | `server/game/GameSession.js` | State machine, submit/reveal phases, AI vote resolution, win conditions |
 | `server/game/Player.js` | Player model (isHuman, isEliminated, isDisconnected, messageHistory[], lastMessageIndex, model) |
@@ -66,7 +67,7 @@ All players (humans + AIs) write simultaneously during SUBMITTING phase (15s). A
 - `game:rejoin({ playerId })` — reconnect mid-game
 
 **Server→Client:**
-- `lobby:state`, `host:assigned`, `game:state` (+ `myId`, `submittedBy[]`, `activePlayerCount`), `game:newMessage`, `game:votingSoon` (`{ delay: 5 }`), `game:voteStart`, `game:voteResult` (`{ eliminated: {id,name,isHuman}|null }`), `game:ended` (`{ winner: 'humans'|'ais'|'solo', players[], winnerPlayerId?, winnerPlayerName? }`), `error`
+- `lobby:state`, `host:assigned`, `game:state` (+ `myId`, `submittedBy[]`, `activePlayerCount`), `game:newMessage`, `game:votingSoon` (`{ delay: 5 }`), `game:voteStart`, `game:voteResult` (`{ eliminated: {id,name,isHuman}|null }` — also appended to chat area client-side), `game:ended` (`{ winner: 'humans'|'ais'|'solo', players[] (each with model field), winnerPlayerId?, winnerPlayerName? }`), `error`
 
 Full `game:state` emitted after every state transition (for reconnection support). `game:newMessage` is emitted in batch at start of REVEALING phase, not per-message in real-time.
 
@@ -78,15 +79,15 @@ Full `game:state` emitted after every state transition (for reconnection support
 - **Game state** lives only in `GameSession.js` — never in socket handlers.
 - **`emitToAll` / `emitToSocket`** must be set by `lobby:start` handler *before* calling `startGame()`, because `startSubmitPhase()` → `emitGameState()` uses them. If not set, crashes as `emitToSocket is not a function`.
 - **All prompts** in `server/ollama/prompts.js` — never inline. Exports: `buildSystemPrompt`, `buildTurnPrompt`, `buildVotePrompt`, `buildNamePrompt`.
-- **AI memory**: `messageHistory[]` per AI player (system prompt + turn prompts + round transcripts). Round transcripts (others' messages only) appended in `resolveSubmitPhase`. `model` field on Player stores which Ollama model they use. `lastMessageIndex` is set but unused (dead field).
+- **AI memory**: `messageHistory[]` per AI player (system prompt + turn prompts + round transcripts). Round transcripts (others' messages only) appended in `resolveSubmitPhase`. `model` field on Player stores which Ollama model they use.
 - **AI name generation**: At game start via `buildNamePrompt()`, retries on duplicates (up to 10 tries), fallback to `AI-xxxx`.
 - **AI vote parsing**: Fuzzy case-insensitive `includes()` match against player names, sorted longest-first to avoid partial-name collisions.
 - **Vote resolution**: AI-only. Majority vote eliminates; ties eliminate no one.
 - **Disconnect**: lobby → removed + host reassigned. Mid-game → `isDisconnected`. In SUBMITTING phase, remaining players may trigger early resolve. Rejoin via `game:rejoin({ playerId })`.
 - **`isDisconnected`** players are excluded from `getActivePlayers()` (treated like eliminated).
 - **AI disconnect asymmetry**: `getActiveAIs()` filters only by `isEliminated` — disconnected AIs still generate messages and vote. Only humans lose active status on disconnect.
-- **Client rejoin**: `client/js/lobby.js` stores `cogito_myId` in localStorage. On page load, emits `game:rejoin` with a 2s timeout — if no `game:state` received, renders lobby fresh.
-- **Dead code**: `GameSession.getAlivePlayers()` (line 68) is identical to `getActivePlayers()` and unused.
+- **Client rejoin** (dual strategy): `lobby.js` stores `cogito_myId` in localStorage, emits `game:rejoin` with 2s timeout — if no `game:state` received, renders lobby fresh. `game.js` also emits `game:rejoin` on load (line 455). Either can win depending on which page loads.
+- **Dead code**: `GameSession.getAlivePlayers()` (line 68) is identical to `getActivePlayers()` and unused. `Player.isActive` is set but never read in game logic (only `isDisconnected` is checked). `lastMessageIndex` is set but unused.
 
 ## Ollama
 - Default URL: `http://192.168.1.30:11434` (configurable via `OLLAMA_BASE_URL`)
@@ -97,4 +98,4 @@ Full `game:state` emitted after every state transition (for reconnection support
 - `node:20-alpine`, `npm ci --omit=dev`, `EXPOSE 3000`
 - Binds `192.168.1.32:3000:3000` (specific IP), custom bridge `cogito-net`
 - Security: `cap_drop: ALL`, `no-new-privileges:true`
-- `.dockerignore` excludes `node_modules/`, `.git/`, `tmp/`, `*.md`
+- `.dockerignore` excludes `node_modules/`, `.git/`, `tmp/`, `*.md`, `.gitignore`, `.dockerignore`
