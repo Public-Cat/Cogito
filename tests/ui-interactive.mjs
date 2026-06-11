@@ -38,6 +38,16 @@ async function run() {
   const pageA = await context.newPage();
   const pageB = await context.newPage();
 
+  // Capture console errors for debugging
+  pageA.on('console', msg => {
+    if (msg.type() === 'error') console.log(`  [CONSOLE ERROR pageA] ${msg.text()}`);
+  });
+  pageA.on('pageerror', err => console.log(`  [PAGE ERROR pageA] ${err.message}`));
+  pageB.on('console', msg => {
+    if (msg.type() === 'error') console.log(`  [CONSOLE ERROR pageB] ${msg.text()}`);
+  });
+  pageB.on('pageerror', err => console.log(`  [PAGE ERROR pageB] ${err.message}`));
+
   try {
     // ── PHASE 0: RESET ──────────────────────────────────────────
     console.log('--- Phase 0: Reset ---');
@@ -174,6 +184,19 @@ async function run() {
     // ── PHASE 4: GAMEPLAY LOOP ──────────────────────────────────
     console.log('--- Phase 4: Gameplay Loop ---');
 
+    // Wait for all human players to fully reconnect (no [DISCONNECTED] in sidebar)
+    async function waitForAllConnected(page, timeout = 15000) {
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        const text = await page.textContent('#playerSidebar').catch(() => '');
+        if (!text.includes('DISCONNECTED')) return true;
+        await sleep(500);
+      }
+      throw new Error('Timeout waiting for all players to reconnect');
+    }
+    await waitForAllConnected(pageA);
+    console.log('  All players reconnected');
+
     async function submitPlayerMessage(page, text) {
       const input = await page.$('#msgInput');
       if (!input) return false;
@@ -189,16 +212,18 @@ async function run() {
     let gameEnded = false;
 
     while (cyclesCompleted < 5 && !gameEnded) {
-      // Wait for SUBMITTING phase
+      // Wait for SUBMITTING phase (or terminal phase if game moved on)
+      await pageA.waitForFunction(
+        () => {
+          const el = document.getElementById('phaseDisplay');
+          return el && ['SUBMITTING', 'VOTING_SOON', 'VOTING', 'ENDED'].includes(el.textContent);
+        },
+        { timeout: 60000 }
+      );
       const phaseText = await pageA.textContent('#phaseDisplay');
-      if (phaseText === 'ENDED' || phaseText === 'VOTING' || phaseText === 'VOTING_SOON') {
+      if (phaseText !== 'SUBMITTING') {
         console.log(`  Game reached: ${phaseText}`);
         break;
-      }
-
-      if (phaseText !== 'SUBMITTING') {
-        // If in REVEALING, wait for next transition
-        await waitForPhase(pageA, 'SUBMITTING', 30000);
       }
 
       const roundDisplay = await pageA.textContent('#roundDisplay');
@@ -219,13 +244,6 @@ async function run() {
       const msgs = await pageA.$$('#messages > *');
       const phaseAfter = await pageA.textContent('#phaseDisplay');
       console.log(`  REVEALING: ${msgs.length} messages, phase: ${phaseAfter}`);
-
-      // Check if game ended or reached voting during reveal
-      const phaseNow = await pageA.textContent('#phaseDisplay');
-      if (phaseNow === 'VOTING_SOON' || phaseNow === 'VOTING' || phaseNow === 'ENDED') {
-        gameEnded = true;
-        console.log(`  Game reached: ${phaseNow}`);
-      }
     }
 
     const finalPhase = await pageA.textContent('#phaseDisplay');
@@ -244,13 +262,32 @@ async function run() {
     if (finalPhase === 'VOTING_SOON' || finalPhase === 'VOTING') {
       console.log('--- Phase 5: Voting ---');
 
-      // If VOTING_SOON, wait for actual VOTING
+      // Log current page URL to detect unexpected navigation
+      const pageUrl = pageA.url();
+      console.log(`  Page A URL: ${pageUrl}`);
+
+      // If VOTING_SOON, wait for actual VOTING (but also log phase changes)
       if (finalPhase === 'VOTING_SOON') {
         console.log('  VOTING_SOON — waiting for VOTING phase...');
-        await pageA.waitForFunction(
-          () => document.getElementById('phaseDisplay').textContent === 'VOTING',
-          undefined, { timeout: 30000 }
-        );
+        const startPoll = Date.now();
+        while (Date.now() - startPoll < 30000) {
+          const currentPhase = await pageA.evaluate(() => {
+            const el = document.getElementById('phaseDisplay');
+            return el ? el.textContent : 'NO_ELEMENT';
+          }).catch(e => `EVAL_ERROR: ${e.message}`);
+          if (currentPhase === 'VOTING') break;
+          if (currentPhase === 'ENDED') { console.log('  Phase became ENDED'); break; }
+          if (currentPhase !== 'VOTING_SOON' && currentPhase !== 'VOTING') {
+            console.log(`  Unexpected phase: ${currentPhase}`);
+          }
+          await sleep(500);
+        }
+        const finalPhaseNow = await pageA.evaluate(() => {
+          const el = document.getElementById('phaseDisplay');
+          return el ? el.textContent : 'NO_ELEMENT';
+        }).catch(e => `EVAL_ERROR: ${e.message}`);
+        console.log(`  Phase after poll: ${finalPhaseNow}`);
+        if (finalPhaseNow !== 'VOTING') throw new Error(`Phase did not become VOTING (was ${finalPhaseNow})`);
       }
 
       // Wait for voting overlay

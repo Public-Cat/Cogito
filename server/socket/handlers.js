@@ -170,8 +170,7 @@ export function registerHandlers(io, socket) {
       player.isDisconnected = false;
       player.isActive = true;
       console.log(`[HUMAN] Player "${player.name}" reconnected`);
-      const gameState = currentSession.getGameState();
-      socket.emit('game:state', { ...gameState, myId: player.id });
+      currentSession.emitGameState();
     } catch (err) {
       console.error('game:rejoin error:', err);
     }
@@ -184,9 +183,22 @@ export function registerHandlers(io, socket) {
         const disconnectedPlayer = currentSession.getPlayerBySocket(socket.id);
         if (disconnectedPlayer) console.log(`[HUMAN] Player "${disconnectedPlayer.name}" disconnected`);
         currentSession.handleDisconnect(socket.id);
-        const host = currentSession.getHost();
-        if (host && host.socketId) {
-          io.to(host.socketId).emit('host:assigned');
+        if (currentSession.state === 'LOBBY') {
+          const lobbyState = currentSession.getLobbyState();
+          const models = getCachedModels();
+          for (const p of currentSession.players) {
+            if (p.socketId) {
+              io.to(p.socketId).emit('lobby:state', {
+                ...lobbyState, models, myId: p.id,
+                isHost: currentSession.getHost()?.socketId === p.socketId,
+              });
+            }
+          }
+        } else {
+          const host = currentSession.getHost();
+          if (host && host.socketId) {
+            io.to(host.socketId).emit('host:assigned');
+          }
         }
       }
     } catch (err) {

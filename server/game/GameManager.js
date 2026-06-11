@@ -21,6 +21,9 @@ const gameManager = {
   },
 
   reset() {
+    if (this.currentSession) {
+      this.currentSession.clearTimers();
+    }
     this.currentSession = null;
     this.playerCounter = 0;
   },
