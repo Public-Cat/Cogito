@@ -76,7 +76,7 @@ Minimum **2 humans + 1 AI** to start. Voting starts after round 2 (i.e. round co
 - `game:rejoin({ playerId })` — reconnect mid-game
 
 **Server→Client:**
-- `lobby:state`, `host:assigned`, `game:state` (+ `myId`, `submittedBy[]`, `activePlayerCount`), `game:newMessage`, `game:votingSoon` (`{ delay: 5 }`), `game:voteStart` (`{ roundNumber }`), `game:voteResult` (`{ eliminated: {id,name,isHuman}|null }`), `game:ended` (`{ winner, players[], winnerPlayerId?, winnerPlayerName? }`), `error`
+- `lobby:state`, `host:assigned`, `game:state` (+ `myId`, `submittedBy[]`, `activePlayerCount`), `game:newMessage`, `game:votingSoon` (`{ delay: 5 }`), `game:voteStart` (`{ roundNumber }`), `game:voteResult` (`{ eliminated: {id,name,isHuman}|null, remainingHumans, remainingAIs }`), `game:ended` (`{ winner, players[], winnerPlayerId?, winnerPlayerName? }`), `error`
 
 Full `game:state` emitted after every state transition. `game:newMessage` is emitted in batch at start of REVEALING, not per-message in real-time. `game:ended.players` includes `model` for each AI.
 
