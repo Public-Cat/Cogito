@@ -84,21 +84,16 @@ export function registerHandlers(io, socket) {
 
       const config = { topic: topic || null, aiPlayers };
 
-      await session.startGame(config);
-
-      const gameState = session.getGameState();
-      for (const p of session.players) {
-        if (p.socketId) {
-          io.to(p.socketId).emit('game:state', { ...gameState, myId: p.id });
-        }
-      }
-
       session.emitToAll = (event, data) => {
         io.emit(event, data);
       };
       session.emitToSocket = (socketId, event, data) => {
         io.to(socketId).emit(event, data);
       };
+
+      await session.startGame(config);
+
+      // emitGameState() inside startSubmitPhase() already emitted game:state per-player
 
       if (typeof callback === 'function') callback({ ok: true });
     } catch (err) {
