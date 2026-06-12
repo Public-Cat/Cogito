@@ -1,16 +1,17 @@
 services:
-  app:
+  cogito:
+    container_name: cogito
     build: .
     ports:
       - "192.168.1.32:3000:3000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - NODE_ENV=production
       - OLLAMA_BASE_URL=http://192.168.1.30:11434
       - PORT=3000
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
     networks:
       - cogito-net
     restart: unless-stopped
