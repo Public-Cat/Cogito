@@ -95,9 +95,9 @@ export class GameSession {
       player.isActive = false;
       if (this.state === STATES.SUBMITTING) {
         this.submittedPlayerIds.delete(player.id);
-        if (this.submittedPlayerIds.size >= this.getActivePlayers().length) {
-          this.resolveSubmitPhase();
-        }
+        // Don't early-resolve on disconnect — let the 15s timer fire
+        // so reconnecting players have a window to rejoin. Early resolve
+        // still happens via handleHumanSubmit when remaining players submit.
       }
     }
   }
