@@ -63,7 +63,7 @@ Minimum **2 humans + 1 AI** to start. Voting starts round ≥ 2, then every roun
 - **`emitToAll` / `emitToSocket`** must be set by `lobby:start` handler *before* calling `startGame()`. `startSubmitPhase()` → `emitGameState()` needs them. Crashes if unset.
 - **AI disconnect asymmetry**: `getActiveAIs()` filters only by `isEliminated` — disconnected AIs still generate messages and vote. Only humans lose active status on disconnect (`getActivePlayers()` checks `isDisconnected`).
 - **AI vote parsing**: Ranking responses split on `[,;\n]`, then fuzzy case-insensitive `includes()` match against player names (longest-first), deduplicated. Unparseable = empty ranking (zero points).
-- **Vote resolution**: AI-only Borda count. Each AI ranks all other players from most suspicious to least. Points: first = N-1, ..., last = 0. Sum across AIs; highest total eliminated. Tiebreaker: among tied players, the one ranked highest (earliest) in more individual AI rankings wins. If still tied, no elimination.
+- **Vote resolution**: AI-only Borda count. Each AI ranks all other players from most suspicious to least. Points: first = N-1, ..., last = 0. Sum across AIs; highest total eliminated. Tiebreaker: among tied players, the one ranked highest (earliest) in more individual AI rankings wins. 3rd-level: cumulative Borda history across all prior voting rounds breaks remaining ties. If still tied, no elimination.
 - **AI memory**: `messageHistory[]` per AI (system prompt + turn prompts + round transcripts of others' messages).
 - **AI name generation**: Via `buildNamePrompt()`, retries on duplicates (up to 10 tries), fallback `AI-xxxx`.
 - **Client rejoin**: lobby.js stores `cogito_myId` in localStorage, both pages emit `game:rejoin` on load. Either can win depending on page load order.
@@ -95,3 +95,5 @@ Full `game:state` emitted after every state transition. `game:ended.players` inc
 | Lobby `disconnect` didn't broadcast to remaining players | Iterate remaining players and emit `lobby:state` per-player |
 | `game:rejoin` only emitted to rejoining socket | Must call `session.emitGameState()` which sends to all players |
 | Shared localStorage `myId` → multi-tab collision | Key is `cogito_myId`, emitted per-player via `game:state.myId` |
+| Borda single-player ranking gave 0 points (N-1 where N=1) | Edge case: ranking only 1 player → give 1 point |
+| Borda ties stalled games with even AI splits | Add cumulative Borda history as 3rd-level tiebreaker |

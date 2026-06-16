@@ -32,6 +32,7 @@ export class GameSession {
     this.voteTimeout = null;
     this.postVoteTimer = null;
     this.aiRankingsResolved = false;
+    this.bordaHistory = new Map();
     this.lastElimination = null;
   }
 
@@ -174,6 +175,7 @@ export class GameSession {
     }))
 
     this.round = 0;
+    this.bordaHistory = new Map();
     console.log(`[GAME] Game started | Topic: "${this.topic}" | Players: [${this.players.map(p => p.name).join(', ')}]`);
     this.startSubmitPhase();
   }
@@ -395,6 +397,11 @@ export class GameSession {
       }
     }
 
+    // Accumulate into cumulative Borda history for future tiebreaker use
+    for (const [playerId, score] of bordaScores) {
+      this.bordaHistory.set(playerId, (this.bordaHistory.get(playerId) || 0) + score);
+    }
+
     let eliminated = null;
     const maxScore = Math.max(...bordaScores.values(), 0);
 
@@ -435,6 +442,7 @@ export class GameSession {
   }
 
   resolveBordaTie(tiedPlayerIds) {
+    // Level 2 tiebreaker: which tied player appears earliest (highest rank) in more individual AI rankings
     const firstPlaceCounts = new Map();
     for (const id of tiedPlayerIds) {
       firstPlaceCounts.set(id, 0);
@@ -465,8 +473,16 @@ export class GameSession {
       return winner;
     }
 
+    // Level 3 tiebreaker: cumulative Borda history across all prior voting rounds
+    leaders.sort((a, b) => (this.bordaHistory.get(b[0]) || 0) - (this.bordaHistory.get(a[0]) || 0));
+    if ((this.bordaHistory.get(leaders[0][0]) || 0) !== (this.bordaHistory.get(leaders[1][0]) || 0)) {
+      const winner = this.getPlayer(leaders[0][0]);
+      console.log(`[GAME] Borda tie resolved via cumulative history: ${winner.name} (${this.bordaHistory.get(leaders[0][0])} pts)`);
+      return winner;
+    }
+
     const tiedNames = tiedPlayerIds.map(id => this.getPlayer(id)?.name).join(', ');
-    console.log(`[GAME] No elimination (Borda tie unresolved: ${tiedNames})`);
+    console.log(`[GAME] No elimination (Borda tie unresolved after cumulative history: ${tiedNames})`);
     return null;
   }
 
