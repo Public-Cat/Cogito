@@ -11,7 +11,7 @@
 
 ## Stack
 - **ES Modules** (`"type": "module"`). App source `.js`, tests `.mjs`.
-- Express + Socket.IO + `node-fetch` for Ollama. No other deps. No TS, no DB, no ORM. All state in memory.
+- Express + Socket.IO + `node-fetch` for Ollama. No other runtime deps. No TS, no DB, no ORM. All state in memory.
 
 ## Commands
 | Command | What |
@@ -33,6 +33,7 @@ All tests are plain Node scripts (no framework), exit via `process.exit(0|1)`. N
 - Ollama at `OLLAMA_BASE_URL` (default `http://192.168.1.30:11434`) with `qwen2.5:7b` pulled.
 - Playwright tests need `npm install` (devDeps: `playwright`, `socket.io-client`).
 - Server session is dirty after each test; clean up with `lobby:reset` or `game:returnToLobby`.
+- Tests connect to `http://192.168.1.32:3000` (dev server port 3000, not Docker port 3008).
 
 ## Game state machine
 `LOBBY → SUBMITTING (15s) → REVEALING (10s) → (loop, round<2) → VOTING_SOON (5s) → VOTING (10s) → (3s delay) → SUBMITTING or ENDED`
@@ -46,11 +47,14 @@ Minimum **2 humans + 1 AI** to start. Voting starts round ≥ 2, then every roun
 | `server/game/GameManager.js` | Singleton — `getOrCreateSession()`, `reset()`, `generatePlayerId()` |
 | `server/game/GameSession.js` | State machine, submit/reveal phases, AI vote resolution, win conditions |
 | `server/game/Player.js` | Player model (`isHuman`, `isEliminated`, `isDisconnected`, `messageHistory[]`, `model`) |
+| `server/game/topics.js` | ~15 discussion topics |
 | `server/ollama/prompts.js` | All AI prompts — never inline |
 | `server/ollama/OllamaClient.js` | HTTP wrapper for Ollama `/api/chat` and `/api/tags` |
 | `server/socket/handlers.js` | All Socket.IO event handlers |
 | `client/js/lobby.js` | Lobby screen logic |
 | `client/js/game.js` | In-game screen logic |
+| `client/js/matrixRain.js` | Canvas rain background |
+| `client/js/sfx.js` | Programmatic sound effects (Web Audio API) |
 
 ## Key conventions
 - **Validation**: Names `/^[a-zA-Z0-9 ]{1,20}$/`, messages ≤500 chars, both HTML-sanitized (`<>&"'` stripped). All handlers wrapped in try/catch.
@@ -76,7 +80,7 @@ Full `game:state` emitted after every state transition. `game:ended.players` inc
 - On failure, returns `"..."` — does not crash.
 
 ## Docker
-- `node:20-alpine`, `npm ci --omit=dev`, binds `192.168.1.32:3000:3000`, custom bridge `cogito-net`, `cap_drop: ALL`, `no-new-privileges:true`.
+- `node:20-alpine`, `npm ci --omit=dev`, service `cogito` binds `192.168.1.32:3008:3000`, custom bridge `cogito-net`, `cap_drop: ALL`, `no-new-privileges:true`.
 - `.dockerignore` excludes `*.md` — `RULES.md` not in image, so `GET /api/rules` returns "Game rules not available."
 
 ## Historical bugs (don't reintroduce)
@@ -89,4 +93,4 @@ Full `game:state` emitted after every state transition. `game:ended.players` inc
 | Shared localStorage `myId` → multi-tab collision | Key is `cogito_myId`, emitted per-player via `game:state.myId` |
 
 ## References
-- **`DEVELOPMENT.md`** — comprehensive architecture reference (partially stale). Use alongside AGENTS.md.
+- **`DEVELOPMENT.md`** — comprehensive architecture reference (517 lines). Cross-reference with AGENTS.md for source-of-truth details.
