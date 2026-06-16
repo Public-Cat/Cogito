@@ -60,13 +60,8 @@ cogito-game/
 │   ├── js/
 │   │   ├── lobby.js              # Lobby screen logic
 │   │   ├── game.js               # In-game screen logic
-│   │   └── sfx.js                # Sound effect management
-│   └── assets/
-│       └── sounds/
-│           ├── eliminated.mp3
-│           ├── vote.mp3
-│           ├── win.mp3
-│           └── lose.mp3
+│   │   ├── matrixRain.js         # Canvas rain background
+│   │   └── sfx.js                # Programmatic sound effects (Web Audio API)
 ├── docker-compose.yml
 ├── Dockerfile
 ├── package.json

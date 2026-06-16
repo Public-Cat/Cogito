@@ -70,10 +70,6 @@ export class GameSession {
     return this.players.filter(p => !p.isEliminated && !p.isDisconnected);
   }
 
-  getAlivePlayers() {
-    return this.players.filter(p => !p.isEliminated && !p.isDisconnected);
-  }
-
   assignHost() {
     const humans = this.players.filter(p => p.isHuman);
     for (const p of this.players) p.isHost = false;
@@ -95,7 +91,6 @@ export class GameSession {
     } else if (this.state === STATES.SUBMITTING || this.state === STATES.REVEALING
       || this.state === STATES.VOTING || this.state === STATES.VOTING_SOON) {
       player.isDisconnected = true;
-      player.isActive = false;
       if (this.state === STATES.SUBMITTING) {
         this.submittedPlayerIds.delete(player.id);
         // Don't early-resolve on disconnect — let the 15s timer fire
@@ -255,7 +250,6 @@ export class GameSession {
         const transcript = othersMsgs.map(m => `[${m.playerName}]: ${m.text}`).join('\n');
         ai.messageHistory.push({ role: 'user', content: transcript });
       }
-      ai.lastMessageIndex = this.messages.length + this.pendingMessages.length;
     }
 
     for (const msg of this.pendingMessages) {

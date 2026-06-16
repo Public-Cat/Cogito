@@ -67,7 +67,6 @@ Minimum **2 humans + 1 AI** to start. Voting starts round ≥ 2, then every roun
 - **AI memory**: `messageHistory[]` per AI (system prompt + turn prompts + round transcripts of others' messages).
 - **AI name generation**: Via `buildNamePrompt()`, retries on duplicates (up to 10 tries), fallback `AI-xxxx`.
 - **Client rejoin**: lobby.js stores `cogito_myId` in localStorage, both pages emit `game:rejoin` on load. Either can win depending on page load order.
-- **Dead code** (don't rely on): `GameSession.getAlivePlayers()` (identical to `getActivePlayers()`, unused). `Player.isActive` set but never read. `Player.lastMessageIndex` set but never read.
 - **Disconnect handler** emits `host:assigned` to host even during in-game disconnect (handlers.js:197-201), but `GameSession.handleDisconnect()` never reassigns host outside lobby — this event is a harmless no-op mid-game.
 
 ## Socket events

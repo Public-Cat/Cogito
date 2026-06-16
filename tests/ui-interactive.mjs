@@ -27,6 +27,18 @@ async function waitForPhase(page, phase, timeout = 60000) {
   );
 }
 
+async function submitPlayerMessage(page, text) {
+  return await page.evaluate((msgText) => {
+    const input = document.getElementById('msgInput');
+    if (!input) return false;
+    if (input.disabled) return false;
+    input.value = msgText;
+    const sendBtn = document.getElementById('sendBtn');
+    if (sendBtn) sendBtn.click();
+    return true;
+  }, text);
+}
+
 async function run() {
   console.log('=== UI Interactive Test: Full Frontend ===\n');
 
@@ -196,16 +208,6 @@ async function run() {
     }
     await waitForAllConnected(pageA);
     console.log('  All players reconnected');
-
-    async function submitPlayerMessage(page, text) {
-      const input = await page.$('#msgInput');
-      if (!input) return false;
-      const disabled = await input.getAttribute('disabled');
-      if (disabled !== null && disabled !== 'false') return false;
-      await page.fill('#msgInput', text);
-      await page.click('#sendBtn');
-      return true;
-    }
 
     // Drive 2 full rounds (SUBMITTING→REVEALING×2) to reach voting
     let cyclesCompleted = 0;
