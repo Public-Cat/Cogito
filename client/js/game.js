@@ -80,6 +80,7 @@ function sendMessage() {
 function stopCountdowns() {
   if (submitCountdownInterval) { clearInterval(submitCountdownInterval); submitCountdownInterval = null; }
   if (revealCountdownInterval) { clearInterval(revealCountdownInterval); revealCountdownInterval = null; }
+  if (voteSoonInterval) { clearInterval(voteSoonInterval); voteSoonInterval = null; }
 }
 
 function startSubmitCountdown() {
@@ -365,12 +366,17 @@ function showEndScreen(data) {
 }
 
 socket.on('game:state', (state) => {
+  const wasSubmitting = gameState?.phase === 'SUBMITTING';
+  const isRevealing = state.phase === 'REVEALING';
+  
   updateUI(state);
+  
   const container = document.getElementById('messages');
-  if (container && state.messages) {
+  if (container && state.messages && !(wasSubmitting && isRevealing)) {
     container.innerHTML = '';
     state.messages.forEach(msg => addMessage(msg, false));
   }
+  
   if (state.phase === 'SUBMITTING') {
     startSubmitCountdown();
   } else if (state.phase === 'REVEALING') {

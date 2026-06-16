@@ -99,7 +99,7 @@ function joinLobby() {
   socket.emit('lobby:setName', { name });
 }
 
-function showLobby(state) {
+async function showLobby(state) {
   clearScrambles();
   const joinPanel = document.getElementById('joinPanel');
   const lobbyContent = document.getElementById('lobbyContent');
@@ -121,7 +121,7 @@ function showLobby(state) {
   if (state.isHost) {
     waitingMsg.style.display = 'none';
     hostPanel.style.display = 'block';
-    setupHostPanel(state);
+    await setupHostPanel(state);
   } else {
     waitingMsg.style.display = 'block';
     hostPanel.style.display = 'none';
@@ -130,7 +130,7 @@ function showLobby(state) {
   renderPlayerList(state.players);
 }
 
-function setupHostPanel(state) {
+async function setupHostPanel(state) {
   // Replace start button to strip stale listeners (accumulated from repeated lobby:state calls)
   const oldBtn = document.getElementById('startBtn');
   if (oldBtn) {
@@ -145,29 +145,18 @@ function setupHostPanel(state) {
 
   const topicSelect = document.getElementById('topicSelect');
   topicSelect.innerHTML = '<option value="">-- random --</option>';
-  const topics = [
-    'Would you rather live in the city or the countryside?',
-    'What makes a piece of music unforgettable?',
-    'Is it ever okay to lie to someone you love?',
-    'What makes a great leader?',
-    'If you could master one skill instantly, what would it be?',
-    'What is the most important quality in a friend?',
-    'Should animals have the same rights as humans?',
-    'What does it mean to live a good life?',
-    'Is technology making us more or less connected?',
-    'What is the best book you have ever read and why?',
-    'If you could travel anywhere, where would you go?',
-    'What is the most important invention in human history?',
-    'Is it better to be talented or hardworking?',
-    'What is your earliest memory?',
-    'If you could have dinner with any historical figure, who would it be?',
-  ];
-  topics.forEach(t => {
-    const opt = document.createElement('option');
-    opt.value = t;
-    opt.textContent = t;
-    topicSelect.appendChild(opt);
-  });
+  try {
+    const res = await fetch('/api/topics');
+    const data = await res.json();
+    (data.topics || []).forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      topicSelect.appendChild(opt);
+    });
+  } catch {
+    console.error('Failed to load topics');
+  }
   if (prevTopic) topicSelect.value = prevTopic;
 
   const aiConfigDiv = document.getElementById('aiConfig');
@@ -318,7 +307,7 @@ function renderPlayerList(players) {
 }
 
 socket.on('lobby:state', (state) => {
-  showLobby(state);
+  (async () => { await showLobby(state); })();
 });
 
 socket.on('host:assigned', () => {

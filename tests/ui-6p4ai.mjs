@@ -142,13 +142,15 @@ async function run() {
     }
 
     async function submitIfEnabled(page, text) {
-      const input = await page.$('#msgInput');
-      if (!input) return false;
-      const disabled = await input.getAttribute('disabled');
-      if (disabled !== null && disabled !== 'false') return false;
-      await page.fill('#msgInput', text);
-      await page.click('#sendBtn');
-      return true;
+      return await page.evaluate((msgText) => {
+        const input = document.getElementById('msgInput');
+        if (!input) return false;
+        if (input.disabled) return false;
+        input.value = msgText;
+        const sendBtn = document.getElementById('sendBtn');
+        if (sendBtn) sendBtn.click();
+        return true;
+      }, text);
     }
 
     // Drive the game: SUBMITTING→REVEALING cycles

@@ -168,7 +168,6 @@ export function registerHandlers(io, socket) {
       if (!player) return;
       player.socketId = socket.id;
       player.isDisconnected = false;
-      player.isActive = true;
       console.log(`[HUMAN] Player "${player.name}" reconnected`);
       currentSession.emitGameState();
     } catch (err) {

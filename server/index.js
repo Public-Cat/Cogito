@@ -6,6 +6,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { getModels } from './ollama/OllamaClient.js';
 import { registerHandlers } from './socket/handlers.js';
+import { topics } from './game/topics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -33,6 +34,10 @@ app.get('/api/models', async (_req, res) => {
 
 app.get('/api/rules', (_req, res) => {
   res.type('text/plain').send(rulesText || 'Game rules not available.');
+});
+
+app.get('/api/topics', (_req, res) => {
+  res.json({ topics });
 });
 
 io.on('connection', (socket) => {
