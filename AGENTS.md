@@ -31,7 +31,8 @@ All tests are plain Node scripts (no framework), exit via `process.exit(0|1)`. N
 ## Test prerequisites
 - Server running at `PORT` (default `3000`).
 - Ollama at `OLLAMA_BASE_URL` (default `http://192.168.1.30:11434`) with `qwen2.5:7b` pulled.
-- Playwright tests need `npm install` (devDeps: `playwright`, `socket.io-client`).
+- `npm install` (devDeps: `playwright`, `socket.io-client`).
+- Playwright UI tests also need `npx playwright install chromium` for browser binary.
 - Server session is dirty after each test; clean up with `lobby:reset` or `game:returnToLobby`.
 - Tests connect to `http://192.168.1.32:3000` (dev server port 3000, not Docker port 3008).
 
