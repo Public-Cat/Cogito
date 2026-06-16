@@ -1,7 +1,7 @@
 import { Player } from './Player.js';
 import { topics as topicList } from './topics.js';
 import { chat } from '../ollama/OllamaClient.js';
-import { buildSystemPrompt, buildTurnPrompt, buildVotePrompt, buildNamePrompt } from '../ollama/prompts.js';
+import { buildSystemPrompt, buildTurnPrompt, buildRankingPrompt, buildNamePrompt } from '../ollama/prompts.js';
 
 const STATES = {
   LOBBY: 'LOBBY',
@@ -19,7 +19,7 @@ export class GameSession {
     this.messages = [];
     this.topic = '';
     this.round = 0;
-    this.aiVotes = new Map();
+    this.aiRankings = new Map();
     this.emitToAll = null;
     this.emitToSocket = null;
     this.submittedPlayerIds = new Set();
@@ -29,7 +29,7 @@ export class GameSession {
     this.voteSoonTimer = null;
     this.voteTimeout = null;
     this.postVoteTimer = null;
-    this.aiVotesResolved = false;
+    this.aiRankingsResolved = false;
     this.lastElimination = null;
   }
 
@@ -296,86 +296,121 @@ export class GameSession {
     if (this.state !== STATES.VOTING_SOON) return;
     this.state = STATES.VOTING;
     console.log(`[GAME] Voting started (Round ${this.round})`);
-    this.aiVotes = new Map();
+    this.aiRankings = new Map();
     this.voteTimeout = null;
-    this.aiVotesResolved = false;
+    this.aiRankingsResolved = false;
     this.emitToAll('game:voteStart', { roundNumber: this.round });
     this.emitGameState();
-    this.collectAIVotes();
+    this.collectAIRankings();
     this.voteTimeout = setTimeout(() => {
       console.log(`[GAME] Voting timeout reached — forcing resolution`);
-      this.aiVotesResolved = true;
-      this.tryResolveVotes();
+      this.aiRankingsResolved = true;
+      this.tryResolveRankings();
     }, 10000);
   }
 
-  async collectAIVotes() {
+  async collectAIRankings() {
     const aiPlayers = this.getActiveAIs();
     const activePlayers = this.getActivePlayers();
     const activePlayerNames = activePlayers.map(p => p.name);
 
-    const votePromises = aiPlayers.map(async (ai) => {
+    const rankingPromises = aiPlayers.map(async (ai) => {
       try {
-        const prompt = buildVotePrompt(activePlayerNames);
+        const prompt = buildRankingPrompt(activePlayerNames);
         ai.messageHistory.push({ role: 'user', content: prompt });
-        const voteResponse = await chat(ai.model, ai.messageHistory);
-        ai.messageHistory.push({ role: 'assistant', content: voteResponse });
-        const voteTarget = activePlayers
-          .filter(p => p.id !== ai.id)
-          .slice()
-          .sort((a, b) => b.name.length - a.name.length)
-          .find(p => voteResponse.toLowerCase().includes(p.name.toLowerCase()));
-        if (voteTarget) {
-          this.aiVotes.set(ai.id, voteTarget.id);
-          console.log(`[AI] ${ai.name} voted for "${voteTarget.name}"`);
+        const rankingResponse = await chat(ai.model, ai.messageHistory);
+        ai.messageHistory.push({ role: 'assistant', content: rankingResponse });
+
+        const parsed = this.parseRankingResponse(rankingResponse, activePlayers, ai.id);
+        this.aiRankings.set(ai.id, parsed);
+        if (parsed.length > 0) {
+          console.log(`[AI] ${ai.name} ranked: [${parsed.map(id => this.getPlayer(id)?.name).join(', ')}]`);
         } else {
-          console.log(`[AI] ${ai.name} vote: could not parse target from "${voteResponse}"`);
+          console.log(`[AI] ${ai.name} ranking: could not parse from "${rankingResponse}"`);
         }
       } catch (err) {
-        console.error(`AI vote failed for ${ai.name}:`, err.message);
+        console.error(`AI ranking failed for ${ai.name}:`, err.message);
+        this.aiRankings.set(ai.id, []);
       }
     });
 
-    await Promise.allSettled(votePromises);
-    this.aiVotesResolved = true;
-    this.tryResolveVotes();
+    await Promise.allSettled(rankingPromises);
+    this.aiRankingsResolved = true;
+    this.tryResolveRankings();
   }
 
-  tryResolveVotes() {
+  parseRankingResponse(response, activePlayers, excludeId) {
+    const candidates = activePlayers
+      .filter(p => p.id !== excludeId)
+      .slice()
+      .sort((a, b) => b.name.length - a.name.length);
+
+    const tokens = response
+      .split(/[,;\n]+/)
+      .map(t => t.trim())
+      .filter(t => t.length > 0);
+
+    const seen = new Set();
+    const ranked = [];
+    for (const token of tokens) {
+      const match = candidates.find(p =>
+        !seen.has(p.id) && token.toLowerCase().includes(p.name.toLowerCase())
+      );
+      if (match) {
+        seen.add(match.id);
+        ranked.push(match.id);
+      }
+    }
+    return ranked;
+  }
+
+  tryResolveRankings() {
     if (this.state !== STATES.VOTING) return;
-    if (!this.aiVotesResolved) return;
+    if (!this.aiRankingsResolved) return;
     if (this.voteTimeout) {
       clearTimeout(this.voteTimeout);
       this.voteTimeout = null;
     }
-    this.resolveVotes();
+    this.resolveRankings();
   }
 
-  resolveVotes() {
-    const voteCounts = new Map();
+  resolveRankings() {
+    const activePlayers = this.getActivePlayers();
+    const bordaScores = new Map();
 
-    for (const targetId of this.aiVotes.values()) {
-      voteCounts.set(targetId, (voteCounts.get(targetId) || 0) + 1);
+    for (const p of activePlayers) {
+      bordaScores.set(p.id, 0);
+    }
+
+    for (const ranking of this.aiRankings.values()) {
+      const n = ranking.length;
+      for (let i = 0; i < n; i++) {
+        // Standard Borda: first gets n-1, last gets 0.
+        // Edge case: ranking only 1 player (only 2 active, one is the AI itself) → give 1 point.
+        const points = n === 1 ? 1 : (n - 1 - i);
+        bordaScores.set(ranking[i], (bordaScores.get(ranking[i]) || 0) + points);
+      }
     }
 
     let eliminated = null;
+    const maxScore = Math.max(...bordaScores.values(), 0);
 
-    const maxVotes = Math.max(...voteCounts.values(), 0);
+    if (maxScore > 0) {
+      const tiedPlayers = [...bordaScores.entries()]
+        .filter(([, score]) => score === maxScore)
+        .map(([id]) => id);
 
-    if (maxVotes > 0) {
-      const targets = [...voteCounts.entries()].filter(([, c]) => c === maxVotes);
-      if (targets.length === 1) {
-        eliminated = this.getPlayer(targets[0][0]);
+      if (tiedPlayers.length === 1) {
+        eliminated = this.getPlayer(tiedPlayers[0]);
       } else {
-        const tiedNames = targets.map(([id]) => this.getPlayer(id)?.name).join(', ');
-        console.log(`[GAME] No elimination (tie: ${tiedNames})`);
+        eliminated = this.resolveBordaTie(tiedPlayers);
       }
     }
 
     if (eliminated) {
       eliminated.isEliminated = true;
       const type = eliminated.isHuman ? 'human' : 'AI';
-      console.log(`[GAME] "${eliminated.name}" eliminated (${type}, votes: ${maxVotes})`);
+      console.log(`[GAME] "${eliminated.name}" eliminated (${type}, Borda score: ${maxScore})`);
     }
 
     const remainingHumans = this.players.filter(p => p.isHuman && !p.isEliminated && !p.isDisconnected).length;
@@ -394,6 +429,42 @@ export class GameSession {
     });
 
     this.postVoteTimer = setTimeout(() => this.checkWinCondition(), 3000);
+  }
+
+  resolveBordaTie(tiedPlayerIds) {
+    const firstPlaceCounts = new Map();
+    for (const id of tiedPlayerIds) {
+      firstPlaceCounts.set(id, 0);
+    }
+
+    for (const ranking of this.aiRankings.values()) {
+      let earliestPos = Infinity;
+      let earliestPlayer = null;
+      for (const id of tiedPlayerIds) {
+        const pos = ranking.indexOf(id);
+        if (pos !== -1 && pos < earliestPos) {
+          earliestPos = pos;
+          earliestPlayer = id;
+        }
+      }
+      if (earliestPlayer !== null) {
+        firstPlaceCounts.set(earliestPlayer, firstPlaceCounts.get(earliestPlayer) + 1);
+      }
+    }
+
+    const maxCount = Math.max(...firstPlaceCounts.values());
+    const leaders = [...firstPlaceCounts.entries()].filter(([, c]) => c === maxCount);
+
+    if (leaders.length === 1) {
+      const tiedNames = tiedPlayerIds.map(id => this.getPlayer(id)?.name).join(', ');
+      const winner = this.getPlayer(leaders[0][0]);
+      console.log(`[GAME] Borda tie resolved via pairwise: ${winner.name} wins among [${tiedNames}]`);
+      return winner;
+    }
+
+    const tiedNames = tiedPlayerIds.map(id => this.getPlayer(id)?.name).join(', ');
+    console.log(`[GAME] No elimination (Borda tie unresolved: ${tiedNames})`);
+    return null;
   }
 
   checkWinCondition() {

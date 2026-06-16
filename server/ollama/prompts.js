@@ -39,17 +39,15 @@ export function buildTurnPrompt(eliminationInfo = null) {
 
 /**
  * Appended to the AI's history during voting phase.
- * Instructs the model to return ONLY a name — no other text.
- * AIs vote out the player who seems most like a human infiltrator.
+ * Instructs the model to rank all active players from most to least suspicious.
+ * Borda count aggregates rankings into scores across all AIs.
  */
-export function buildVotePrompt(activePlayerNames) {
-  return `Vote now. You are an AI looking for human infiltrators.
+export function buildRankingPrompt(activePlayerNames) {
+  return `Rank the remaining players from MOST suspicious (most human-like) to LEAST suspicious.
 
-Look at the conversation so far. Who seemed the most human? Vote for them.
+Players: ${activePlayerNames.join(', ')}
 
-Players still in: ${activePlayerNames.join(', ')}
-
-Do not vote for yourself. Reply with ONLY that player's name. Nothing else.`;
+Reply with a comma-separated list ordered from most suspicious to least suspicious. Do not include yourself.`;
 }
 
 /**
