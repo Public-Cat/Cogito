@@ -3,6 +3,8 @@ import { topics as topicList } from './topics.js';
 import { chat } from '../ollama/OllamaClient.js';
 import { buildSystemPrompt, buildTurnPrompt, buildRankingPrompt, buildNamePrompt } from '../ollama/prompts.js';
 
+const PERSONALITIES = ['skeptical', 'enthusiastic', 'thoughtful', 'dry', 'curious', 'anxious'];
+
 const STATES = {
   LOBBY: 'LOBBY',
   SUBMITTING: 'SUBMITTING',
@@ -165,8 +167,9 @@ export class GameSession {
         aiPlayer.name = `AI-${Math.random().toString(36).slice(2, 6)}`;
         console.log(`[AI] ${aiPlayer.model} using fallback name "${aiPlayer.name}"`);
       }
+      aiPlayer.personality = PERSONALITIES[Math.floor(Math.random() * PERSONALITIES.length)];
       aiPlayer.messageHistory = [
-        { role: 'system', content: buildSystemPrompt(aiPlayer.name, this.topic, this.players.map(p => p.name)) },
+        { role: 'system', content: buildSystemPrompt(aiPlayer.name, this.topic, this.players.map(p => p.name), aiPlayer.personality) },
       ];
     }))
 
@@ -316,7 +319,7 @@ export class GameSession {
 
     const rankingPromises = aiPlayers.map(async (ai) => {
       try {
-        const prompt = buildRankingPrompt(activePlayerNames);
+        const prompt = buildRankingPrompt(activePlayerNames, this.lastElimination);
         ai.messageHistory.push({ role: 'user', content: prompt });
         const rankingResponse = await chat(ai.model, ai.messageHistory);
         ai.messageHistory.push({ role: 'assistant', content: rankingResponse });
