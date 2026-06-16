@@ -50,9 +50,10 @@ cd cogito-game
 docker compose up --build
 ```
 
-Then open `http://localhost:3000` in your browser.
+Then open `http://192.168.1.32:3008` in your browser (port and IP are
+configured in `docker-compose.yml` — adjust for your network).
 
-To let other players join from phones on the same network, share your local IP:
+To let other players join from phones on the same network (dev mode), share:
 
 ```
 http://192.168.x.x:3000
@@ -118,9 +119,12 @@ cogito-game/
 │   │   └── sfx.js           # Programmatic sound effects (Web Audio API)
 ├── AGENTS.md                # Agent workflow instructions
 ├── RULES.md                 # Full game rules
+├── DEVELOPMENT.md           # Architecture reference
 ├── Dockerfile
 ├── docker-compose.yml
 ├── package.json
+├── LICENSE
+├── screenshots/             # README screenshots
 └── .dockerignore
 ```
 
@@ -148,7 +152,7 @@ The host will see all available models in the game lobby configuration panel. Mo
 |---|---|---|
 | `PORT` | `3000` | HTTP port the server listens on |
 | `OLLAMA_BASE_URL` | `http://192.168.1.30:11434` | Base URL for the Ollama API |
-| `NODE_ENV` | `development` | Set to `production` in Docker |
+| `NODE_ENV` | *(not set)* | Set to `production` in Docker (affects Express caching & error verbosity) |
 
 ---
 

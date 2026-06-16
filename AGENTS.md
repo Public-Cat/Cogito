@@ -11,7 +11,7 @@
 
 ## Stack
 - **ES Modules** (`"type": "module"`). App source `.js`, tests `.mjs`.
-- Express + Socket.IO + `node-fetch` for Ollama. No other runtime deps. No TS, no DB, no ORM. All state in memory.
+- Express + Socket.IO + `node-fetch` for Ollama. No TS, no DB, no ORM. All state in memory.
 
 ## Commands
 | Command | What |
@@ -66,7 +66,8 @@ Minimum **2 humans + 1 AI** to start. Voting starts round ≥ 2, then every roun
 - **AI memory**: `messageHistory[]` per AI (system prompt + turn prompts + round transcripts of others' messages).
 - **AI name generation**: Via `buildNamePrompt()`, retries on duplicates (up to 10 tries), fallback `AI-xxxx`.
 - **Client rejoin**: lobby.js stores `cogito_myId` in localStorage, both pages emit `game:rejoin` on load. Either can win depending on page load order.
-- **Dead code** (don't rely on): `GameSession.getAlivePlayers()` (identical to `getActivePlayers()`, unused). `Player.isActive` set but never read — only `isDisconnected` checked in game logic. `Player.lastMessageIndex` set but never read.
+- **Dead code** (don't rely on): `GameSession.getAlivePlayers()` (identical to `getActivePlayers()`, unused). `Player.isActive` set but never read. `Player.lastMessageIndex` set but never read.
+- **Disconnect handler** emits `host:assigned` to host even during in-game disconnect (handlers.js:197-201), but `GameSession.handleDisconnect()` never reassigns host outside lobby — this event is a harmless no-op mid-game.
 
 ## Socket events
 **Client→Server**: `lobby:setName`, `lobby:start` (callback), `game:sendMessage`, `game:returnToLobby`, `lobby:reset`, `game:rejoin`
@@ -75,12 +76,14 @@ Minimum **2 humans + 1 AI** to start. Voting starts round ≥ 2, then every roun
 
 Full `game:state` emitted after every state transition. `game:ended.players` includes `model` for each AI.
 
+**Reset distinction**: `lobby:reset` calls `gameManager.reset()` + broadcasts empty `lobby:state` to ALL connected sockets. `game:returnToLobby` does not broadcast — emits `lobby:state` with `isHost: true` only to the caller, making them the new host.
+
 ## Ollama
 - Default URL configurable via `OLLAMA_BASE_URL`. Model list polled every 30s, cached. Timeouts: chat 30s, model list 5s.
 - On failure, returns `"..."` — does not crash.
 
 ## Docker
-- `node:20-alpine`, `npm ci --omit=dev`, service `cogito` binds `192.168.1.32:3008:3000`, custom bridge `cogito-net`, `cap_drop: ALL`, `no-new-privileges:true`.
+- `node:20-alpine`, `npm ci --omit=dev`, service `cogito` binds `192.168.1.32:3008:3000`, custom bridge `cogito-net`, `cap_drop: ALL`, `no-new-privileges:true`, `restart: unless-stopped`.
 - `.dockerignore` excludes `*.md` but preserves `!RULES.md` — `RULES.md` is included in the image to serve via `GET /api/rules`.
 
 ## Historical bugs (don't reintroduce)
@@ -91,6 +94,3 @@ Full `game:state` emitted after every state transition. `game:ended.players` inc
 | Lobby `disconnect` didn't broadcast to remaining players | Iterate remaining players and emit `lobby:state` per-player |
 | `game:rejoin` only emitted to rejoining socket | Must call `session.emitGameState()` which sends to all players |
 | Shared localStorage `myId` → multi-tab collision | Key is `cogito_myId`, emitted per-player via `game:state.myId` |
-
-## References
-- **`DEVELOPMENT.md`** — comprehensive architecture reference (517 lines). Cross-reference with AGENTS.md for source-of-truth details.
