@@ -81,7 +81,7 @@ Full `game:state` emitted after every state transition. `game:ended.players` inc
 
 ## Docker
 - `node:20-alpine`, `npm ci --omit=dev`, service `cogito` binds `192.168.1.32:3008:3000`, custom bridge `cogito-net`, `cap_drop: ALL`, `no-new-privileges:true`.
-- `.dockerignore` excludes `*.md` — `RULES.md` not in image, so `GET /api/rules` returns "Game rules not available."
+- `.dockerignore` excludes `*.md` but preserves `!RULES.md` — `RULES.md` is included in the image to serve via `GET /api/rules`.
 
 ## Historical bugs (don't reintroduce)
 | Bug | Fix |
