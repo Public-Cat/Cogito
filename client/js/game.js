@@ -267,7 +267,7 @@ function showVotingOverlay() {
   const overlay = document.getElementById('votingOverlay');
   overlay.style.display = 'flex';
   const targetsDiv = document.getElementById('voteTargets');
-  targetsDiv.innerHTML = '<p style="color:var(--color-text-dim);">> AI players are voting...</p>';
+  targetsDiv.innerHTML = '<p style="color:var(--color-text-dim);">> AI players are ranking...</p>';
   document.getElementById('voteTimer').textContent = '10';
   document.getElementById('voteWaiting').style.display = 'none';
 

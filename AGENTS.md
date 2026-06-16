@@ -61,8 +61,8 @@ Minimum **2 humans + 1 AI** to start. Voting starts round ≥ 2, then every roun
 - **Game state** lives only in `GameSession.js` — never in socket handlers.
 - **`emitToAll` / `emitToSocket`** must be set by `lobby:start` handler *before* calling `startGame()`. `startSubmitPhase()` → `emitGameState()` needs them. Crashes if unset.
 - **AI disconnect asymmetry**: `getActiveAIs()` filters only by `isEliminated` — disconnected AIs still generate messages and vote. Only humans lose active status on disconnect (`getActivePlayers()` checks `isDisconnected`).
-- **AI vote parsing**: Fuzzy case-insensitive `includes()` match against player names, sorted longest-first to avoid partial-name collisions.
-- **Vote resolution**: AI-only. Majority eliminates; ties eliminate no one.
+- **AI vote parsing**: Ranking responses split on `[,;\n]`, then fuzzy case-insensitive `includes()` match against player names (longest-first), deduplicated. Unparseable = empty ranking (zero points).
+- **Vote resolution**: AI-only Borda count. Each AI ranks all other players from most suspicious to least. Points: first = N-1, ..., last = 0. Sum across AIs; highest total eliminated. Tiebreaker: among tied players, the one ranked highest (earliest) in more individual AI rankings wins. If still tied, no elimination.
 - **AI memory**: `messageHistory[]` per AI (system prompt + turn prompts + round transcripts of others' messages).
 - **AI name generation**: Via `buildNamePrompt()`, retries on duplicates (up to 10 tries), fallback `AI-xxxx`.
 - **Client rejoin**: lobby.js stores `cogito_myId` in localStorage, both pages emit `game:rejoin` on load. Either can win depending on page load order.
