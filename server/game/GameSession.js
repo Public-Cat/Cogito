@@ -35,6 +35,7 @@ export class GameSession {
     this.aiRankingsResolved = false;
     this.bordaHistory = new Map();
     this.lastElimination = null;
+    this.lastRoundMessages = [];
   }
 
   addPlayer(id, isHuman, socketId) {
@@ -131,6 +132,27 @@ export class GameSession {
     };
   }
 
+  /**
+   * Ask the model for a human first name not already in `taken` (lowercased, case-insensitive).
+   * Sanitizes to the allowed name charset, retries on duplicates/invalid/failed responses, and
+   * falls back to a unique AI-xxxx handle if the model won't produce a fresh distinct name
+   * (e.g. a model that deterministically returns the same name).
+   * @param {string} model
+   * @param {Set<string>} taken - lowercased names already in use
+   * @returns {Promise<string>}
+   */
+  async generateUniqueAIName(model, taken) {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const res = await chat(model, [{ role: 'user', content: buildNamePrompt() }]);
+      const name = res.trim().split('\n')[0].replace(/[^a-zA-Z0-9 ]/g, '').trim().slice(0, 20);
+      if (name && name !== '...' && !taken.has(name.toLowerCase())) return name;
+    }
+    let fallback;
+    do { fallback = `AI-${Math.random().toString(36).slice(2, 6)}`; } while (taken.has(fallback.toLowerCase()));
+    console.log(`[AI] ${model} name fallback "${fallback}" (no fresh distinct name)`);
+    return fallback;
+  }
+
   async startGame(config) {
     this.topic = config.topic || topicList[Math.floor(Math.random() * topicList.length)];
     this.messages = [];
@@ -139,36 +161,27 @@ export class GameSession {
       p.isEliminated = false;
     }
     const aiConfigs = config.aiPlayers || [];
-    await Promise.all(aiConfigs.map(async (cfg) => {
+    // Assign names sequentially so each AI's dedup sees the names already taken (a parallel
+    // Promise.all races: siblings' names aren't set yet, so every AI collides — e.g. gemma3,
+    // which always answers "Ethan"). Reserve names in a shared set as they're chosen.
+    const takenNames = new Set(this.players.map(p => p.name.toLowerCase()));
+    const aiPlayers = [];
+    for (const cfg of aiConfigs) {
       const aiPlayer = this.addPlayer(`ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, false, null);
       aiPlayer.model = cfg.model;
-      try {
-        const nameResponse = await chat(aiPlayer.model, [
-          { role: 'user', content: buildNamePrompt() },
-        ]);
-        let name = nameResponse.trim().split('\n')[0].trim();
-        if (!name || name === '...') throw new Error('invalid name');
-        const existingNames = this.players.filter(p => p !== aiPlayer).map(p => p.name.toLowerCase());
-        let attempt = 0;
-        while (existingNames.includes(name.toLowerCase()) && attempt < 10) {
-          const retryResponse = await chat(aiPlayer.model, [
-            { role: 'user', content: buildNamePrompt() },
-          ]);
-          name = retryResponse.trim().split('\n')[0].trim();
-          if (!name || name === '...') throw new Error('invalid name');
-          attempt++;
-        }
-        aiPlayer.name = name;
-        console.log(`[AI] ${aiPlayer.name} (${aiPlayer.model}) chose name`);
-      } catch {
-        aiPlayer.name = `AI-${Math.random().toString(36).slice(2, 6)}`;
-        console.log(`[AI] ${aiPlayer.model} using fallback name "${aiPlayer.name}"`);
-      }
+      aiPlayer.name = await this.generateUniqueAIName(aiPlayer.model, takenNames);
+      takenNames.add(aiPlayer.name.toLowerCase());
       aiPlayer.personality = PERSONALITIES[Math.floor(Math.random() * PERSONALITIES.length)];
-      aiPlayer.messageHistory = [
-        { role: 'system', content: buildSystemPrompt(aiPlayer.name, this.topic, this.players.map(p => p.name), aiPlayer.personality) },
+      aiPlayers.push(aiPlayer);
+      console.log(`[AI] ${aiPlayer.name} (${aiPlayer.model}) joined`);
+    }
+    // Build system prompts only after every name exists, so the "other AIs" list is complete.
+    const allPlayerNames = this.players.map(p => p.name);
+    for (const ai of aiPlayers) {
+      ai.messageHistory = [
+        { role: 'system', content: buildSystemPrompt(ai.name, this.topic, allPlayerNames, ai.personality) },
       ];
-    }))
+    }
 
     this.round = 0;
     this.bordaHistory = new Map();
@@ -196,10 +209,41 @@ export class GameSession {
     this.submitTimer = setTimeout(() => this.resolveSubmitPhase(), 15000);
   }
 
+  /**
+   * Build a one-line salience cue from last round's messages so an AI's next message
+   * lands on the live thread (esp. accusations). Deterministic, no LLM call. Derived
+   * ONLY from already-resolved prior-round messages — never the current round — so it
+   * adds no information the AI wouldn't already have, preserving simultaneous-submit fairness.
+   * @param {Player} ai - the AI about to generate
+   * @returns {string|null} hint like "Alice suspects Sophia is the human", or null
+   */
+  buildDiscussionHint(ai) {
+    const recent = this.lastRoundMessages;
+    if (!recent || recent.length === 0) return null;
+    const names = this.players.map(p => p.name);
+    const SUSPICION = ['human', 'suspicious', 'suspect', 'pretend', 'impostor', 'imposter',
+      'sus', 'bot', 'fake', 'accus', 'not an ai', 'is a human', 'real person'];
+
+    // Prefer an active accusation: someone naming another player alongside a suspicion word.
+    for (const m of recent) {
+      if (m.playerId === ai.id) continue;
+      const lower = m.text.toLowerCase();
+      if (!SUSPICION.some(k => lower.includes(k))) continue;
+      const named = names.find(n => n !== m.playerName && lower.includes(n.toLowerCase()));
+      if (named) return `${m.playerName} suspects ${named} is the human`;
+    }
+
+    // Fallback: surface the last thing another player said so the AI replies to it.
+    const others = recent.filter(m => m.playerId !== ai.id);
+    const humanMsgs = others.filter(m => this.getPlayer(m.playerId)?.isHuman);
+    const pick = (humanMsgs.length ? humanMsgs : others).slice(-1)[0];
+    if (!pick) return null;
+    const snippet = pick.text.split(/\s+/).slice(0, 12).join(' ');
+    return `${pick.playerName} said: "${snippet}"`;
+  }
+
   async generateAIMessage(ai) {
-    const turnPrompt = this.lastElimination
-      ? buildTurnPrompt(this.lastElimination)
-      : buildTurnPrompt();
+    const turnPrompt = buildTurnPrompt(this.lastElimination, this.buildDiscussionHint(ai));
     const messages = [...ai.messageHistory, { role: 'user', content: turnPrompt }];
     const reply = await chat(ai.model, messages);
     if (this.state !== STATES.SUBMITTING) return;
@@ -252,6 +296,8 @@ export class GameSession {
         ai.messageHistory.push({ role: 'user', content: transcript });
       }
     }
+
+    this.lastRoundMessages = [...this.pendingMessages];
 
     for (const msg of this.pendingMessages) {
       this.messages.push(msg);

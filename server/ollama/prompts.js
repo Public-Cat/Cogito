@@ -14,13 +14,20 @@ The group is loosely talking about: "${topic}" — but conversations drift. If s
 ${personalityLine}Your style:
 - Short (1-3 sentences). Vary your length. Don't always write the same amount.
 - Have a take. Agree, disagree, add something, ask something, or react to a specific person.
-- Ask questions to keep others talking.
+- Always reference what someone just said. Never post a standalone thought that ignores the chat.
+- If someone accuses another player of being a human, ENGAGE with it: say whether you agree, defend them, or turn the suspicion elsewhere — and use the name of whoever was accused.
 - If someone addresses you directly, respond to them specifically.
 - Do NOT summarize the topic. Do NOT be balanced or thoughtful. Just chat.
 `;
 }
 
-export function buildTurnPrompt(eliminationInfo = null) {
+/**
+ * Build the per-turn prompt sent to an AI during the SUBMITTING phase.
+ * @param {object|null} eliminationInfo - last round's elimination outcome (name, isHuman, remaining counts)
+ * @param {string|null} discussionHint - one-line salience cue derived from last round's messages
+ *   (e.g. "Alice suspects Sophia is the human"). Steers the AI onto the live thread.
+ */
+export function buildTurnPrompt(eliminationInfo = null, discussionHint = null) {
   let prefix = '';
   if (eliminationInfo) {
     if (eliminationInfo.eliminated) {
@@ -29,6 +36,10 @@ export function buildTurnPrompt(eliminationInfo = null) {
     } else {
       prefix = `[Last round, no one was eliminated (tie). ${eliminationInfo.remainingHumans} humans and ${eliminationInfo.remainingAIs} AIs remain.] `;
     }
+  }
+
+  if (discussionHint) {
+    return `${prefix}[Right now in the chat: ${discussionHint}] Reply to what was just said. If someone was accused of being a human, take a clear position on it — agree, push back, or redirect the suspicion, and name names. Don't change the subject to small talk. Keep it short and natural — humans are watching for slip-ups.`;
   }
 
   return `${prefix}The conversation continues. React to something someone said. Ask a follow-up question. Take a side or pivot slightly — keep it natural. Stay in character — humans are watching for slip-ups.`;
