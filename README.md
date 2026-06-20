@@ -81,9 +81,9 @@ Opens on `http://localhost:3000` (configurable via `PORT`).
 7. After the timer (or when all have submitted), messages are revealed together in a 10-second REVEALING phase.
 8. After round 2, a voting phase occurs after every round:
    - A 5-second VOTING_SOON warning is shown.
-   - AIs vote privately and simultaneously (server-side via Ollama) on who they think is human.
-   - Humans are spectators during voting — only AIs vote.
-   - The player with the majority AI vote is eliminated (or no one, on a tie).
+   - AIs rank players privately and simultaneously (server-side via Ollama) on who they think is human.
+   - Each active human casts a single vote (no ranking) for the one player they want eliminated — votes count as much as an AI's top pick. Humans can vote out other humans to chase a sole-survivor win, or band together to vote out every AI.
+   - The player with the highest combined score is eliminated (or no one, if it stays tied).
    - A 3-second delay shows the result before the next round begins.
 9. Game ends when all AIs or all humans are eliminated.
 

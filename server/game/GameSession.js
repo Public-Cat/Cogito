@@ -22,6 +22,7 @@ export class GameSession {
     this.topic = '';
     this.round = 0;
     this.aiRankings = new Map();
+    this.humanVotes = new Map();
     this.emitToAll = null;
     this.emitToSocket = null;
     this.submittedPlayerIds = new Set();
@@ -296,6 +297,8 @@ export class GameSession {
     this.state = STATES.VOTING;
     console.log(`[GAME] Voting started (Round ${this.round})`);
     this.aiRankings = new Map();
+    this.humanVotes = new Map();
+    for (const human of this.getActiveHumans()) human.currentVote = null;
     this.voteTimeout = null;
     this.aiRankingsResolved = false;
     this.emitToAll('game:voteStart', { roundNumber: this.round });
@@ -363,6 +366,24 @@ export class GameSession {
     return ranked;
   }
 
+  castHumanVote(player, targetId) {
+    if (this.state !== STATES.VOTING) return false;
+    if (!player.isHuman || player.isEliminated || player.isDisconnected) return false;
+    if (targetId === player.id) return false;
+
+    const target = this.getPlayer(targetId);
+    if (!target || target.isEliminated || target.isDisconnected) return false;
+
+    this.humanVotes.set(player.id, targetId);
+    player.currentVote = targetId;
+    console.log(`[HUMAN] ${player.name} voted for ${target.name}`);
+    this.emitToAll('game:voteProgress', {
+      votedCount: this.humanVotes.size,
+      totalEligible: this.getActiveHumans().length,
+    });
+    return true;
+  }
+
   tryResolveRankings() {
     if (this.state !== STATES.VOTING) return;
     if (!this.aiRankingsResolved) return;
@@ -389,6 +410,13 @@ export class GameSession {
         const points = n === 1 ? 1 : (n - 1 - i);
         bordaScores.set(ranking[i], (bordaScores.get(ranking[i]) || 0) + points);
       }
+    }
+
+    // Human votes count as a full "first place" Borda pick — same weight as
+    // an AI ranking that one player at the top of their list.
+    const humanVotePoints = activePlayers.length <= 1 ? 1 : activePlayers.length - 1;
+    for (const targetId of this.humanVotes.values()) {
+      bordaScores.set(targetId, (bordaScores.get(targetId) || 0) + humanVotePoints);
     }
 
     // Accumulate into cumulative Borda history for future tiebreaker use
@@ -454,6 +482,14 @@ export class GameSession {
       }
       if (earliestPlayer !== null) {
         firstPlaceCounts.set(earliestPlayer, firstPlaceCounts.get(earliestPlayer) + 1);
+      }
+    }
+
+    // A human's single vote is always their "first place" pick, so it counts
+    // toward this tiebreaker the same way an AI's top-ranked pick does.
+    for (const targetId of this.humanVotes.values()) {
+      if (firstPlaceCounts.has(targetId)) {
+        firstPlaceCounts.set(targetId, firstPlaceCounts.get(targetId) + 1);
       }
     }
 

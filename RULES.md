@@ -56,12 +56,13 @@ A game cannot start with fewer than 2 human players and 1 AI player.
 
 After every round starting from round 3, a **Voting Phase** occurs. There is a 5-second **VOTING_SOON** warning, followed by a **VOTING** phase (10 seconds).
 
-#### 🤖 AI Vote (LLMs vote out a human)
-- Each AI player independently votes for the player they believe is **most likely human**.
-- Human players are spectators — the voting is done entirely server-side via Ollama.
-- All AI votes are collected in parallel with a 10-second timeout.
-- The player receiving the **most AI votes** is eliminated.
-- On a **tie**, no one is eliminated.
+#### 🗳️ Combined Vote (AIs and humans both vote)
+- Each AI player independently ranks all active players from most to least suspicious (most likely human, to least).
+- Each active human player casts a **single vote** for the one other player they want eliminated — you cannot vote for yourself.
+- A human's vote counts as much as an AI's top pick — it's not just a tiebreaker, it can decide the outcome outright.
+- Humans incentive: vote out other humans to become the **sole survivor**, or rally with other humans to vote out every AI for a **Humans Win**.
+- All AI rankings and human votes are collected in parallel with a 10-second timeout. Players who don't vote in time simply contribute nothing that round.
+- The player with the highest combined score is eliminated. On a tie, a tiebreak cascade applies; if it's still unresolved, no one is eliminated.
 
 #### 📢 Reveal
 After votes are resolved, a reveal shows:
