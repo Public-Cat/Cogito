@@ -105,7 +105,7 @@ const STATES = { LOBBY, SUBMITTING, REVEALING, VOTING_SOON, VOTING, ENDED };
 - **REVEALING**: `pendingMessages` broadcast via `game:newMessage` and appended to `this.messages` (10s timer). Round counter increments.
 - **Round 2+ check**: After REVEALING, if `round >= 2`, transition to `VOTING_SOON`. Otherwise, loop back to SUBMITTING.
 - **VOTING_SOON**: 5-second warning. Emits `game:votingSoon`.
-- **VOTING**: AI-only rankings via Ollama (`collectAIRankings()`). `Promise.allSettled` with 10s timeout. Borda count aggregates rankings; highest total eliminated. Tiebreaker: ranked highest in more individual rankings wins; still tied → no elimination. Emit `game:voteResult`. 3-second `setTimeout` then `checkWinCondition()`.
+- **VOTING**: AI rankings via Ollama (`collectAIRankings()`, `Promise.allSettled`) plus single-target human votes (`castHumanVote()`, via `game:castVote`), both collected for the full 10s timeout. Borda count aggregates AI rankings and human votes (each human vote = a full first-place pick) into one score per player; highest total eliminated. Tiebreaker: ranked/voted highest in more individual rankings/votes wins; still tied → cumulative Borda history breaks it; still tied → no elimination. Emit `game:voteResult`. 3-second `setTimeout` then `checkWinCondition()`.
 - **ENDED**: Emit `game:ended`. Players call `game:returnToLobby` → `GameManager.reset()`.
 
 ### emitToAll / emitToSocket
@@ -174,7 +174,7 @@ In `resolveSubmitPhase()`:
 3. This keeps history compact — one `user` entry per round of others' messages.
 4. All `pendingMessages` are then moved to the main `this.messages` array and emitted via `game:newMessage`.
 
-### Voting (Borda Count)
+### Voting (Combined AI + Human Borda Count)
 
 When the voting phase begins (`startVoting()`):
 1. `collectAIRankings()` iterates over all active AIs and calls Ollama in parallel (`Promise.allSettled`).
@@ -184,10 +184,11 @@ When the voting phase begins (`startVoting()`):
    - Call `chat(ai.model, ai.messageHistory)`.
    - Push the model's reply as `{ role: "assistant", content: reply }` to history.
    - Parse the reply: split on `[,;\n]`, then fuzzy case-insensitive `includes()` match tokens against active player names (longest-first), deduplicated. Store ordered array in `this.aiRankings` Map. Empty array if unparseable (zero points from that AI).
-3. Once all AI rankings are collected (or 10s timeout fires), call `tryResolveRankings()` → `resolveRankings()`.
-4. `resolveRankings()` implements **Borda count**: each AI's ranking awards `(N-1-i)` points to position `i` (first gets N-1, last gets 0). Sum across all AIs. Highest total eliminated.
-5. Tiebreaker: if Borda ties, the tied player ranked highest (earliest) in more individual AI rankings wins. If still tied, no elimination.
-6. Emit `game:voteResult`. After a 3-second `setTimeout`, call `checkWinCondition()`.
+3. In parallel, active connected humans may emit `game:castVote { targetId }`, handled by `castHumanVote(player, targetId)`: rejects votes outside VOTING phase, from eliminated/disconnected players, self-votes, or invalid/eliminated targets. Valid votes are stored in `this.humanVotes` (`Map<voterId, targetId>`) and broadcast as `game:voteProgress { votedCount, totalEligible }`. No early-resolve — votes are collected for the full 10s window same as AI rankings.
+4. Once all AI rankings are collected (or the 10s `voteTimeout` fires), call `tryResolveRankings()` → `resolveRankings()`.
+5. `resolveRankings()` implements **Borda count**: each AI's ranking awards `(N-1-i)` points to position `i` (first gets N-1, last gets 0). Each human vote awards a flat `N-1` points to its target — the same weight as an AI's top-ranked pick. All points sum into one `bordaScores` Map. Highest total eliminated.
+6. Tiebreaker: if Borda ties, the tied player ranked/voted highest (earliest) in more individual AI rankings *or* human votes wins (a human vote always counts as "earliest" for its target). If still tied, cumulative Borda history across all prior rounds breaks it. If still tied, no elimination.
+7. Emit `game:voteResult`. After a 3-second `setTimeout`, call `checkWinCondition()`.
 
 ### Prompts
 
@@ -282,7 +283,7 @@ Layout (terminal window style):
 - **Input area**: Text input + SEND button. Enabled during SUBMITTING phase (if player hasn't submitted yet). Shows countdown timer and submission status.
 - **Phase indicators**: During SUBMITTING, shows "write your response (Xs)". During REVEALING, shows "reading responses... (Xs)". During VOTING_SOON, shows "voting in Xs...".
 - **Player list sidebar** (desktop) / **collapsible panel** (mobile): Shows all players, their status (active / eliminated / disconnected). Players who have submitted show a checkmark.
-- **Voting overlay**: Full-screen modal that appears during voting phase. Shows "AI players are voting..." with a countdown timer (10 seconds). No vote buttons — AI voting is server-side only. Humans are spectators.
+- **Voting overlay**: Full-screen modal that appears during voting phase, with a countdown timer (10 seconds). Active humans see a `> VOTE {name}` button per other active player (self excluded) — clicking emits `game:castVote` and disables all buttons; eliminated/spectating humans see "waiting for humans to vote...". AI voting itself remains server-side via Ollama, invisible to the client.
 - **End screen overlay**: Full-screen takeover. Shows "HUMANS WIN", "AIs WIN", or "[NAME] IS THE SOLE SURVIVOR" in large text. Lists all players with their true identity revealed. RETURN button.
 
 ---

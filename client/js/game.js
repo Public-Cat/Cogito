@@ -268,27 +268,31 @@ function showVotingOverlay() {
   const overlay = document.getElementById('votingOverlay');
   overlay.style.display = 'flex';
   const targetsDiv = document.getElementById('voteTargets');
-  targetsDiv.innerHTML = '<p style="color:var(--color-text-dim);">> AI players are ranking...</p>';
+  targetsDiv.innerHTML = '';
   document.getElementById('voteTimer').textContent = '10';
   document.getElementById('voteWaiting').style.display = 'none';
 
-  if (gameState) {
-    const activePlayers = gameState.players.filter(p => !p.isEliminated && !p.isDisconnected);
-    const list = document.createElement('div');
-    list.style.marginTop = '16px';
-    list.style.textAlign = 'left';
-    list.innerHTML = '<h3 style="color:var(--color-text-dim);margin-bottom:8px;text-align:center;">players:</h3>';
-    activePlayers.forEach(p => {
-      const div = document.createElement('div');
-      div.style.padding = '2px 0';
-      div.style.color = 'var(--color-text-dim)';
-      div.textContent = `> ${p.name}`;
-      list.appendChild(div);
-    });
-    targetsDiv.appendChild(list);
-  }
+  if (!gameState) return;
+  const activePlayers = gameState.players.filter(p => !p.isEliminated && !p.isDisconnected);
+  const me = gameState.players.find(p => p.id === myId);
 
-  document.querySelectorAll('#voteTargets button').forEach(b => b.disabled = true);
+  if (me && me.isHuman && !me.isEliminated) {
+    activePlayers.forEach(p => {
+      if (p.id === myId) return;
+      const btn = document.createElement('button');
+      btn.textContent = `> VOTE ${p.name}`;
+      btn.style.padding = '12px 24px';
+      btn.style.margin = '4px';
+      btn.addEventListener('click', () => {
+        socket.emit('game:castVote', { targetId: p.id });
+        document.querySelectorAll('#voteTargets button').forEach(b => b.disabled = true);
+        document.getElementById('voteWaiting').style.display = 'block';
+      });
+      targetsDiv.appendChild(btn);
+    });
+  } else {
+    targetsDiv.innerHTML = '<p style="color:var(--color-text-dim);">> waiting for humans to vote...</p>';
+  }
 
   let timeLeft = 10;
   const timer = setInterval(() => {
@@ -296,6 +300,8 @@ function showVotingOverlay() {
     document.getElementById('voteTimer').textContent = timeLeft;
     if (timeLeft <= 0) {
       clearInterval(timer);
+      document.querySelectorAll('#voteTargets button').forEach(b => b.disabled = true);
+      document.getElementById('voteWaiting').style.display = 'block';
     }
   }, 1000);
 }
@@ -431,6 +437,10 @@ socket.on('game:voteStart', () => {
   voteSoonCountdown = null;
   playVote();
   showVotingOverlay();
+});
+
+socket.on('game:voteProgress', ({ votedCount, totalEligible }) => {
+  document.getElementById('voteWaiting').textContent = `> WAITING FOR VOTES... (${votedCount}/${totalEligible})`;
 });
 
 socket.on('game:voteResult', (result) => {

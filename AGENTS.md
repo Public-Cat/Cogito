@@ -46,8 +46,8 @@ Minimum **2 humans + 1 AI** to start. Voting starts round ≥ 2, then every roun
 |---|---|
 | `server/index.js` | Express app, Socket.IO init, static files, `/api/models`, `/api/rules` |
 | `server/game/GameManager.js` | Singleton — `getOrCreateSession()`, `reset()`, `generatePlayerId()` |
-| `server/game/GameSession.js` | State machine, submit/reveal phases, AI vote resolution, win conditions |
-| `server/game/Player.js` | Player model (`isHuman`, `isEliminated`, `isDisconnected`, `messageHistory[]`, `model`) |
+| `server/game/GameSession.js` | State machine, submit/reveal phases, combined AI+human vote resolution, win conditions |
+| `server/game/Player.js` | Player model (`isHuman`, `isEliminated`, `isDisconnected`, `messageHistory[]`, `model`, `currentVote`) |
 | `server/game/topics.js` | ~15 discussion topics |
 | `server/ollama/prompts.js` | All AI prompts — never inline |
 | `server/ollama/OllamaClient.js` | HTTP wrapper for Ollama `/api/chat` and `/api/tags` |
@@ -63,16 +63,17 @@ Minimum **2 humans + 1 AI** to start. Voting starts round ≥ 2, then every roun
 - **`emitToAll` / `emitToSocket`** must be set by `lobby:start` handler *before* calling `startGame()`. `startSubmitPhase()` → `emitGameState()` needs them. Crashes if unset.
 - **AI disconnect asymmetry**: `getActiveAIs()` filters only by `isEliminated` — disconnected AIs still generate messages and vote. Only humans lose active status on disconnect (`getActivePlayers()` checks `isDisconnected`).
 - **AI vote parsing**: Ranking responses split on `[,;\n]`, then fuzzy case-insensitive `includes()` match against player names (longest-first), deduplicated. Unparseable = empty ranking (zero points).
-- **Vote resolution**: AI-only Borda count. Each AI ranks all other players from most suspicious to least. Points: first = N-1, ..., last = 0. Sum across AIs; highest total eliminated. Tiebreaker: among tied players, the one ranked highest (earliest) in more individual AI rankings wins. 3rd-level: cumulative Borda history across all prior voting rounds breaks remaining ties. If still tied, no elimination.
+- **Vote resolution**: Combined AI+human Borda count. Each AI ranks all other players from most suspicious to least (points: first = N-1, ..., last = 0). Each active, non-disconnected human casts a single vote for one other player (self-votes rejected server-side) — counted as a full N-1 "first place" pick, same weight as an AI's top choice. All points sum into one score per player; highest total eliminated. Tiebreaker: among tied players, the one ranked/voted highest (earliest) in more individual AI rankings or human votes wins. 3rd-level: cumulative Borda history across all prior voting rounds breaks remaining ties. If still tied, no elimination. Disconnected humans don't vote (humans have no input device while offline, unlike autonomous AIs).
+- **Human vote casting**: `game:castVote { targetId }` → `GameSession.castHumanVote(player, targetId)`. Rejects votes outside VOTING phase, from eliminated/disconnected players, self-votes, or invalid/eliminated targets. No early-resolve on full participation — votes are collected for the full 10s window like AI rankings, then resolved at the existing `voteTimeout`.
 - **AI memory**: `messageHistory[]` per AI (system prompt + turn prompts + round transcripts of others' messages).
 - **AI name generation**: Via `buildNamePrompt()`, retries on duplicates (up to 10 tries), fallback `AI-xxxx`.
 - **Client rejoin**: lobby.js stores `cogito_myId` in localStorage, both pages emit `game:rejoin` on load. Either can win depending on page load order.
 - **Disconnect handler** emits `host:assigned` to host even during in-game disconnect (handlers.js:197-201), but `GameSession.handleDisconnect()` never reassigns host outside lobby — this event is a harmless no-op mid-game.
 
 ## Socket events
-**Client→Server**: `lobby:setName`, `lobby:start` (callback), `game:sendMessage`, `game:returnToLobby`, `lobby:reset`, `game:rejoin`
+**Client→Server**: `lobby:setName`, `lobby:start` (callback), `game:sendMessage`, `game:castVote`, `game:returnToLobby`, `lobby:reset`, `game:rejoin`
 
-**Server→Client**: `lobby:state`, `host:assigned`, `game:state` (+ per-player `myId`, `submittedBy[]`, `activePlayerCount`), `game:newMessage` (batched at REVEALING start), `game:votingSoon`, `game:voteStart`, `game:voteResult`, `game:ended`, `error`
+**Server→Client**: `lobby:state`, `host:assigned`, `game:state` (+ per-player `myId`, `submittedBy[]`, `activePlayerCount`), `game:newMessage` (batched at REVEALING start), `game:votingSoon`, `game:voteStart`, `game:voteProgress` (`votedCount`/`totalEligible`, after each human vote), `game:voteResult`, `game:ended`, `error`
 
 Full `game:state` emitted after every state transition. `game:ended.players` includes `model` for each AI.
 

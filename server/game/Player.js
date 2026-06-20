@@ -9,5 +9,6 @@ export class Player {
     this.isHost = false;
     this.model = null;
     this.messageHistory = null;
+    this.currentVote = null;
   }
 }
