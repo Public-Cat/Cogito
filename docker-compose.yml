@@ -13,7 +13,7 @@ services:
       - OLLAMA_BASE_URL=http://192.168.1.30:11434
       - PORT=3000
     ports:
-      - "192.168.1.32:3008:3000"
+      - 3008:3000
     
     restart: unless-stopped
 
