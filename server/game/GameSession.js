@@ -7,6 +7,7 @@ const PERSONALITIES = ['skeptical', 'enthusiastic', 'thoughtful', 'dry', 'curiou
 
 // Duration of the VOTING phase before rankings/votes are force-resolved.
 const VOTE_TIMEOUT_MS = 20000;
+const SUBMIT_PHASE_MS = 45000;
 
 const STATES = {
   LOBBY: 'LOBBY',
@@ -98,7 +99,7 @@ export class GameSession {
       player.isDisconnected = true;
       if (this.state === STATES.SUBMITTING) {
         this.submittedPlayerIds.delete(player.id);
-        // Don't early-resolve on disconnect — let the 15s timer fire
+        // Don't early-resolve on disconnect — let the submit timer fire
         // so reconnecting players have a window to rejoin. Early resolve
         // still happens via handleHumanSubmit when remaining players submit.
       }
@@ -209,7 +210,7 @@ export class GameSession {
       this.generateAIMessage(ai);
     }
 
-    this.submitTimer = setTimeout(() => this.resolveSubmitPhase(), 15000);
+    this.submitTimer = setTimeout(() => this.resolveSubmitPhase(), SUBMIT_PHASE_MS);
   }
 
   /**
