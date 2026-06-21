@@ -4,6 +4,7 @@ const socket = io();
 
 const urlParams = new URLSearchParams(window.location.search);
 let myId = urlParams.get('myId') || localStorage.getItem('cogito_myId') || null;
+let myToken = localStorage.getItem('cogito_myToken') || null;
 let gameState = null;
 const SUBMIT_PHASE_SECONDS = 45;
 
@@ -137,6 +138,11 @@ function updateUI(state) {
   gameState = state;
   if (state.myId) {
     myId = state.myId;
+    localStorage.setItem('cogito_myId', state.myId);
+  }
+  if (state.myToken) {
+    myToken = state.myToken;
+    localStorage.setItem('cogito_myToken', state.myToken);
   }
 
   document.getElementById('topicDisplay').textContent = `> ${state.topic || 'no topic'}`;
@@ -478,5 +484,5 @@ socket.on('error', ({ message }) => {
 render();
 
 if (myId) {
-  socket.emit('game:rejoin', { playerId: myId });
+  socket.emit('game:rejoin', { playerId: myId, token: myToken });
 }

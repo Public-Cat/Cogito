@@ -10,6 +10,12 @@ import { topics } from './game/topics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '127.0.0.1';
+
+// CORS allow-list: restrict Socket.IO handshakes to known origins. Override
+// via ALLOWED_ORIGINS (comma-separated) for self-hosted domains/LAN names.
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ||
+  'https://cogito.example.com,https://cogito.home.arpa').split(',').map(s => s.trim());
 
 const RULES_PATH = path.join(__dirname, '..', 'RULES.md');
 let rulesText = '';
@@ -22,7 +28,7 @@ try {
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  cors: { origin: ALLOWED_ORIGINS, methods: ['GET', 'POST'] },
 });
 
 app.use(express.static(path.join(__dirname, '..', 'client')));
@@ -41,10 +47,13 @@ app.get('/api/topics', (_req, res) => {
 });
 
 io.on('connection', (socket) => {
-  console.log(`Socket connected: ${socket.id}`);
+  // Realm stamping: only a reverse proxy on the LAN is trusted to set this
+  // header, so default to 'public' (fail safe) when it's absent or wrong.
+  socket.data.realm = socket.handshake.headers['x-cogito-realm'] === 'lan' ? 'lan' : 'public';
+  console.log(`Socket connected: ${socket.id} (realm: ${socket.data.realm})`);
   registerHandlers(io, socket);
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`Cogito server listening on port ${PORT}`);
+httpServer.listen(PORT, HOST, () => {
+  console.log(`Cogito server listening on ${HOST}:${PORT}`);
 });

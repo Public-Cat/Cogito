@@ -12,15 +12,21 @@ async function main() {
 
   // 0. Reset any stale session
   t("Resetting stale session...");
-  const resetSocket = io(BASE);
+  const resetSocket = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => resetSocket.on("connect", r));
+  // lobby:reset requires the caller to be a lan host, so join first to
+  // become host of any leftover/empty session before resetting it.
+  await new Promise(r => {
+    resetSocket.emit("lobby:setName", { name: "Resetter" });
+    resetSocket.once("lobby:state", r);
+  });
   resetSocket.emit("lobby:reset");
   await sleep(500);
   resetSocket.disconnect();
 
   // 1. Join as 2 humans
   t("Joining Player A (host)...");
-  const sA = io(BASE);
+  const sA = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => sA.on("connect", r));
   const la = await new Promise(r => {
     sA.emit("lobby:setName", { name: "Alice" });
@@ -31,7 +37,7 @@ async function main() {
   if (!la.isHost) throw new Error("FAIL: Alice should be host");
 
   t("Joining Player B...");
-  const sB = io(BASE);
+  const sB = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => sB.on("connect", r));
   const lb = await new Promise(r => {
     sB.emit("lobby:setName", { name: "Bob" });

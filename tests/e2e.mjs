@@ -8,15 +8,21 @@ async function main() {
 
   // 0. Reset any stale session
   t("Resetting stale session...");
-  const resetSocket = io(BASE);
+  const resetSocket = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => resetSocket.on("connect", r));
+  // lobby:reset requires the caller to be a lan host, so join first to
+  // become host of any leftover/empty session before resetting it.
+  await new Promise(r => {
+    resetSocket.emit("lobby:setName", { name: "Resetter" });
+    resetSocket.once("lobby:state", r);
+  });
   resetSocket.emit("lobby:reset");
   await new Promise(r => setTimeout(r, 300));
   resetSocket.disconnect();
 
   // 1. Player A (host) joins
   t("Player A (host) joining...");
-  const socketA = io(BASE);
+  const socketA = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => socketA.on("connect", r));
 
   const lobbyA = await new Promise(r => {
@@ -29,7 +35,7 @@ async function main() {
 
   // 2. Player B joins
   t("Player B joining...");
-  const socketB = io(BASE);
+  const socketB = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => socketB.on("connect", r));
 
   // Set up host's listener BEFORE emitting so there's no race
