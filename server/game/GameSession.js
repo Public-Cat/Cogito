@@ -5,6 +5,9 @@ import { buildSystemPrompt, buildTurnPrompt, buildRankingPrompt, buildNamePrompt
 
 const PERSONALITIES = ['skeptical', 'enthusiastic', 'thoughtful', 'dry', 'curious', 'anxious'];
 
+// Duration of the VOTING phase before rankings/votes are force-resolved.
+const VOTE_TIMEOUT_MS = 20000;
+
 const STATES = {
   LOBBY: 'LOBBY',
   SUBMITTING: 'SUBMITTING',
@@ -354,7 +357,7 @@ export class GameSession {
       console.log(`[GAME] Voting timeout reached — forcing resolution`);
       this.aiRankingsResolved = true;
       this.tryResolveRankings();
-    }, 10000);
+    }, VOTE_TIMEOUT_MS);
   }
 
   async collectAIRankings() {

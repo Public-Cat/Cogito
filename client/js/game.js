@@ -36,7 +36,7 @@ function render() {
     </div>
     <div id="votingOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.95);z-index:100;justify-content:center;align-items:center;flex-direction:column;">
       <h2 style="color:var(--color-warning);margin-bottom:24px;">> VOTING PHASE</h2>
-      <p id="voteTimer" style="color:var(--color-text-dim);margin-bottom:16px;">10</p>
+      <p id="voteTimer" style="color:var(--color-text-dim);margin-bottom:16px;">20</p>
       <div id="voteTargets" style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;max-width:600px;"></div>
       <div id="voteWaiting" style="display:none;color:var(--color-text-dim);margin-top:24px;">> WAITING FOR VOTES...</div>
     </div>
@@ -269,7 +269,7 @@ function showVotingOverlay() {
   overlay.style.display = 'flex';
   const targetsDiv = document.getElementById('voteTargets');
   targetsDiv.innerHTML = '';
-  document.getElementById('voteTimer').textContent = '10';
+  document.getElementById('voteTimer').textContent = '20';
   document.getElementById('voteWaiting').style.display = 'none';
 
   if (!gameState) return;
@@ -294,7 +294,7 @@ function showVotingOverlay() {
     targetsDiv.innerHTML = '<p style="color:var(--color-text-dim);">> waiting for humans to vote...</p>';
   }
 
-  let timeLeft = 10;
+  let timeLeft = 20;
   const timer = setInterval(() => {
     timeLeft--;
     document.getElementById('voteTimer').textContent = timeLeft;

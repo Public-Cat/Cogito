@@ -92,7 +92,7 @@ See `AGENTS.md` for the current socket event reference — it is the authoritati
 ### Game State Machine
 
 ```
-LOBBY → SUBMITTING (15s) → REVEALING (10s) → loop (round<2) → VOTING_SOON (5s) → VOTING (10s) → (3s delay) → SUBMITTING or ENDED
+LOBBY → SUBMITTING (15s) → REVEALING (10s) → loop (round<2) → VOTING_SOON (5s) → VOTING (20s) → (3s delay) → SUBMITTING or ENDED
 ```
 
 States are constants in `GameSession.js`:
