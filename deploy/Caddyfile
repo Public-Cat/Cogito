@@ -1,0 +1,33 @@
+# Caddyfile for Cogito — two vhosts, split-horizon realm design.
+#
+# Public vhost: fronted by Cloudflare Tunnel, reachable by anyone with the
+# link + SESSION_CODE. LAN vhost: never tunneled, reachable only from the
+# local network (or the host itself), grants host privileges.
+#
+# Replace cogito.example.com with your real public domain before deploying.
+# See deploy/DEPLOY.md for the full runbook.
+
+# Public — published through Cloudflare Tunnel. Friends reach this.
+cogito.example.com {
+    reverse_proxy 127.0.0.1:3008 {
+        # SECURITY: strip-then-set. A client could send its own
+        # X-Cogito-Realm header trying to claim "lan" privileges — delete
+        # whatever they sent first, then force the correct value. Order
+        # matters: header_up directives apply in sequence.
+        header_up -X-Cogito-Realm          # SECURITY: strip anything the client sent
+        header_up X-Cogito-Realm public    # force public realm
+    }
+}
+
+# LAN only — never in the Cloudflare Tunnel ingress. Host (you) reaches this.
+cogito.home.arpa {
+    tls internal
+    reverse_proxy 127.0.0.1:3008 {
+        header_up -X-Cogito-Realm
+        header_up X-Cogito-Realm lan       # grants host privileges
+    }
+}
+
+# Note: Caddy proxies WebSocket upgrade requests (Socket.IO) automatically
+# through reverse_proxy — no separate config needed — and header_up applies
+# to those upgraded connections the same as normal HTTP requests.

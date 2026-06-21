@@ -3,18 +3,35 @@ services:
     container_name: cogito
     build: .
     networks:
-      - cogito-net   
+      - cogito-net
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
     environment:
       - NODE_ENV=production
       - OLLAMA_BASE_URL=http://192.168.1.30:11434
       - PORT=3000
+      # HOST controls which interface the Node process binds inside the
+      # container — it does NOT make this safe to expose on the LAN/WAN.
+      # The actual access restriction is the 127.0.0.1-only port binding
+      # below; only the host (running Caddy) can reach this container.
+      - HOST=0.0.0.0
+      # SECURITY: set a real secret here (or via a .env file) before going
+      # live — this placeholder is public knowledge. Rotate by changing the
+      # value and running `docker compose up -d`.
+      - SESSION_CODE=changeme
+      # SECURITY: replace with your real public + LAN vhost URLs (must match
+      # the Caddyfile in deploy/Caddyfile). Comma-separated, no spaces.
+      - ALLOWED_ORIGINS=https://cogito.example.com,https://cogito.home.arpa
     ports:
-      - 3008:3000
-    
+      # Bind to loopback only: nothing on the LAN or 0.0.0.0 can reach this
+      # port directly. Caddy (running on the host) is the only intended
+      # caller, proxying both the public and LAN vhosts to this address.
+      - 127.0.0.1:3008:3000
     restart: unless-stopped
 
 networks:

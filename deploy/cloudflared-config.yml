@@ -1,0 +1,27 @@
+# Cloudflare Tunnel ingress config for Cogito.
+#
+# Publishes ONLY the public hostname (cogito.example.com) to Caddy.
+# cogito.home.arpa is DELIBERATELY ABSENT from this ingress list — it is
+# LAN-only and must NEVER be tunneled to the internet. The only gate on the
+# public hostname is the in-app SESSION_CODE (see deploy/DEPLOY.md); do not
+# rely on hostname secrecy alone.
+#
+# Replace <TUNNEL_ID> with your tunnel's UUID (from `cloudflared tunnel create`)
+# and cogito.example.com with your real domain. Place this file at
+# /etc/cloudflared/config.yml (or wherever `cloudflared` expects it) on the host.
+
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  # Public vhost only. Caddy terminates TLS for cogito.example.com and
+  # forwards to the app over the loopback-bound Docker port (see
+  # docker-compose.yml: 127.0.0.1:3008:3000).
+  - hostname: cogito.example.com
+    service: https://localhost:443      # Caddy; use noTLSVerify if Caddy uses internal CA
+    originRequest:
+      noTLSVerify: true
+
+  # Catch-all: anything not explicitly matched above is rejected. This is
+  # what keeps cogito.home.arpa (and everything else) off the public internet.
+  - service: http_status:404
