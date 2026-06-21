@@ -4,3 +4,4 @@ node_modules/
 .DS_Store
 tmp/
 worktrees/
+.claude/settings.local.json
