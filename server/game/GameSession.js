@@ -9,6 +9,33 @@ const PERSONALITIES = ['skeptical', 'enthusiastic', 'thoughtful', 'dry', 'curiou
 const VOTE_TIMEOUT_MS = 20000;
 const SUBMIT_PHASE_MS = 45000;
 
+// Max simultaneous in-flight requests to Ollama. Bounds load when many AIs
+// are configured; semantics (results/timeouts per task) are unchanged —
+// this only throttles how many run at once.
+const MAX_CONCURRENT_OLLAMA_CALLS = 4;
+
+/**
+ * Run `tasks` (functions returning promises) with at most `limit` in flight
+ * at a time. Resolves to an array of results in the same order as `tasks`,
+ * matching Promise.all's contract (rejects on first rejection).
+ * @param {Array<() => Promise<any>>} tasks
+ * @param {number} limit
+ * @returns {Promise<any[]>}
+ */
+function promisePool(tasks, limit) {
+  const results = new Array(tasks.length);
+  let next = 0;
+  async function worker() {
+    while (true) {
+      const i = next++;
+      if (i >= tasks.length) return;
+      results[i] = await tasks[i]();
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => worker());
+  return Promise.all(workers).then(() => results);
+}
+
 const STATES = {
   LOBBY: 'LOBBY',
   SUBMITTING: 'SUBMITTING',
@@ -77,10 +104,14 @@ export class GameSession {
   }
 
   assignHost() {
-    const humans = this.players.filter(p => p.isHuman);
+    // Only LAN-realm humans (trusted, behind the reverse proxy's header) may
+    // host — hosting grants privileged control (lobby:reset, lobby:start).
+    // Public-realm players never become host; if none qualify, no host is
+    // assigned (the game simply can't be started by a public player).
+    const lanHumans = this.players.filter(p => p.isHuman && p.realm === 'lan');
     for (const p of this.players) p.isHost = false;
-    if (humans.length > 0) {
-      humans[0].isHost = true;
+    if (lanHumans.length > 0) {
+      lanHumans[0].isHost = true;
     }
   }
 
@@ -160,8 +191,10 @@ export class GameSession {
   async startGame(config) {
     this.topic = config.topic || topicList[Math.floor(Math.random() * topicList.length)];
     this.messages = [];
+    // isHost is intentionally left untouched here — it must remain stable
+    // through the game so privileged mid-game actions (game:returnToLobby)
+    // can still verify the original host. Only eliminated status resets.
     for (const p of this.players) {
-      p.isHost = false;
       p.isEliminated = false;
     }
     const aiConfigs = config.aiPlayers || [];
@@ -206,9 +239,10 @@ export class GameSession {
     }
 
     const activeAIs = activePlayers.filter(p => !p.isHuman);
-    for (const ai of activeAIs) {
-      this.generateAIMessage(ai);
-    }
+    // Fire-and-forget, but bounded: each generateAIMessage() already resolves
+    // its own state independently, so we don't await this pool's result.
+    promisePool(activeAIs.map(ai => () => this.generateAIMessage(ai)), MAX_CONCURRENT_OLLAMA_CALLS)
+      .catch(err => console.error('AI message pool error:', err));
 
     this.submitTimer = setTimeout(() => this.resolveSubmitPhase(), SUBMIT_PHASE_MS);
   }
@@ -366,7 +400,7 @@ export class GameSession {
     const activePlayers = this.getActivePlayers();
     const activePlayerNames = activePlayers.map(p => p.name);
 
-    const rankingPromises = aiPlayers.map(async (ai) => {
+    const rankingTasks = aiPlayers.map(ai => async () => {
       try {
         const prompt = buildRankingPrompt(activePlayerNames, this.lastElimination);
         ai.messageHistory.push({ role: 'user', content: prompt });
@@ -386,7 +420,9 @@ export class GameSession {
       }
     });
 
-    await Promise.allSettled(rankingPromises);
+    // Each task already catches its own errors, so the pool (built on
+    // Promise.all over workers) is equivalent to the prior Promise.allSettled.
+    await promisePool(rankingTasks, MAX_CONCURRENT_OLLAMA_CALLS);
     this.aiRankingsResolved = true;
     this.tryResolveRankings();
   }
@@ -637,7 +673,9 @@ export class GameSession {
     const state = this.getGameState();
     for (const p of this.players) {
       if (p.socketId) {
-        this.emitToSocket(p.socketId, 'game:state', { ...state, myId: p.id });
+        // myToken is sent ONLY to its owner — never broadcast or attached to
+        // other players' entries — so it can't be read off the wire by others.
+        this.emitToSocket(p.socketId, 'game:state', { ...state, myId: p.id, myToken: p.rejoinToken || null });
       }
     }
   }

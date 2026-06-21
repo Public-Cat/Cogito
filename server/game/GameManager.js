@@ -1,8 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { GameSession } from './GameSession.js';
 
 const gameManager = {
   currentSession: null,
-  playerCounter: 0,
 
   getOrCreateSession() {
     if (!this.currentSession) {
@@ -15,9 +15,10 @@ const gameManager = {
     return this.currentSession;
   },
 
+  // Random UUID instead of a sequential counter — prevents enumerating
+  // other players' ids (e.g. player_1, player_2, ...) to hijack rejoin.
   generatePlayerId() {
-    this.playerCounter++;
-    return `player_${this.playerCounter}`;
+    return randomUUID();
   },
 
   reset() {
@@ -25,7 +26,6 @@ const gameManager = {
       this.currentSession.clearTimers();
     }
     this.currentSession = null;
-    this.playerCounter = 0;
   },
 };
 

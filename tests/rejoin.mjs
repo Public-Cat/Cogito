@@ -8,25 +8,33 @@ async function main() {
 
   // 0. Reset any stale session
   t("Resetting stale session...");
-  const resetSocket = io(BASE);
+  const resetSocket = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => resetSocket.on("connect", r));
+  // lobby:reset requires the caller to be a lan host, so join first to
+  // become host of any leftover/empty session before resetting it.
+  await new Promise(r => {
+    resetSocket.emit("lobby:setName", { name: "Resetter" });
+    resetSocket.once("lobby:state", r);
+  });
   resetSocket.emit("lobby:reset");
   await new Promise(r => setTimeout(r, 300));
   resetSocket.disconnect();
 
   // 1. Two players join lobby
   t("Player A joining...");
-  const sA = io(BASE);
+  const sA = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => sA.on("connect", r));
   const la = await new Promise(r => {
     sA.emit("lobby:setName", { name: "Alice" });
     sA.once("lobby:state", r);
   });
   const aliceId = la.myId;
+  const aliceToken = la.myToken;
   t("A joined, myId=" + aliceId + ", isHost=" + la.isHost);
   if (!la.isHost) throw new Error("FAIL: Player A should be host");
+  if (!aliceToken) throw new Error("FAIL: lobby:state should include myToken");
 
-  const sB = io(BASE);
+  const sB = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => sB.on("connect", r));
   const lb = await new Promise(r => {
     sB.emit("lobby:setName", { name: "Bob" });
@@ -54,12 +62,12 @@ async function main() {
   sA.disconnect();
   await new Promise(r => setTimeout(r, 300));
 
-  const sA2 = io(BASE);
+  const sA2 = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => sA2.on("connect", r));
   t("New socket connected, sending game:rejoin...");
 
   const rejoinState = await new Promise(r => {
-    sA2.emit("game:rejoin", { playerId: aliceId });
+    sA2.emit("game:rejoin", { playerId: aliceId, token: aliceToken });
     sA2.once("game:state", r);
   });
   t("Rejoin: phase=" + rejoinState.phase + ", players=" + rejoinState.players.length + ", myId=" + rejoinState.myId);

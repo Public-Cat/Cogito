@@ -19,18 +19,21 @@ async function main() {
   // ─────────────────────────────────────────────────────────────
   console.log("--- Scenario 1: Lobby host disconnect → reassignment ---\n");
 
-  const resetSock = io(BASE);
+  const resetSock = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => resetSock.on("connect", r));
+  // lobby:reset requires the caller to be a lan host, so join first to
+  // become host of any leftover/empty session before resetting it.
+  await new Promise(r => { resetSock.emit("lobby:setName", { name: "Resetter" }); resetSock.once("lobby:state", r); });
   resetSock.emit("lobby:reset");
   await sleep(300);
   resetSock.disconnect();
 
-  const s1 = io(BASE);
+  const s1 = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => s1.on("connect", r));
   await new Promise(r => { s1.emit("lobby:setName", { name: "Alice" }); s1.once("lobby:state", r); });
   t("Alice joined (host)");
 
-  const s2 = io(BASE);
+  const s2 = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => s2.on("connect", r));
   const l2 = await new Promise(r => { s2.emit("lobby:setName", { name: "Bob" }); s2.once("lobby:state", r); });
   t("Bob joined, isHost=" + l2.isHost + ", myId=" + l2.myId);
@@ -58,24 +61,27 @@ async function main() {
   // ─────────────────────────────────────────────────────────────
   console.log("--- Scenario 2: Mid-game disconnect during SUBMITTING ---\n");
 
-  const r2 = io(BASE);
+  const r2 = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => r2.on("connect", r));
+  await new Promise(r => { r2.emit("lobby:setName", { name: "Resetter" }); r2.once("lobby:state", r); });
   r2.emit("lobby:reset");
   await sleep(300);
   r2.disconnect();
 
   // Join 3 humans
-  const pA = io(BASE);
+  const pA = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => pA.on("connect", r));
-  await new Promise(r => { pA.emit("lobby:setName", { name: "Alice" }); pA.once("lobby:state", r); });
+  const laState = await new Promise(r => { pA.emit("lobby:setName", { name: "Alice" }); pA.once("lobby:state", r); });
+  const aliceId = laState.myId;
+  const aliceToken = laState.myToken;
   t("Alice joined");
 
-  const pB = io(BASE);
+  const pB = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => pB.on("connect", r));
   await new Promise(r => { pB.emit("lobby:setName", { name: "Bob" }); pB.once("lobby:state", r); });
   t("Bob joined");
 
-  const pC = io(BASE);
+  const pC = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => pC.on("connect", r));
   const lc = await new Promise(r => { pC.emit("lobby:setName", { name: "Carol" }); pC.once("lobby:state", r); });
   t("Carol joined, myId=" + lc.myId);
@@ -111,11 +117,19 @@ async function main() {
   t("Alice is listed as disconnected: " + aliceInPlayers.isDisconnected);
   console.log("  PASS: Game continues after mid-game disconnect\n");
 
-  // Cleanup scenario 2
+  // Cleanup scenario 2 — host (Alice) never gets reassigned mid-game by design,
+  // so rejoin as Alice (the only one authorized for game:returnToLobby) to reset.
+  const pAReconnect = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
+  await new Promise(r => pAReconnect.on("connect", r));
   await new Promise(r => {
-    pB.emit("game:returnToLobby");
-    pB.once("lobby:state", r);
+    pAReconnect.emit("game:rejoin", { playerId: aliceId, token: aliceToken });
+    pAReconnect.once("game:state", r);
   });
+  await new Promise(r => {
+    pAReconnect.emit("game:returnToLobby");
+    pAReconnect.once("lobby:state", r);
+  });
+  pAReconnect.disconnect();
   pB.disconnect();
   pC.disconnect();
 
@@ -126,17 +140,18 @@ async function main() {
   // ─────────────────────────────────────────────────────────────
   console.log("--- Scenario 3: AI disconnect behavior ---\n");
 
-  const r3 = io(BASE);
+  const r3 = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => r3.on("connect", r));
+  await new Promise(r => { r3.emit("lobby:setName", { name: "Resetter" }); r3.once("lobby:state", r); });
   r3.emit("lobby:reset");
   await sleep(300);
   r3.disconnect();
 
-  const qA = io(BASE);
+  const qA = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => qA.on("connect", r));
   await new Promise(r => { qA.emit("lobby:setName", { name: "Alice" }); qA.once("lobby:state", r); });
 
-  const qB = io(BASE);
+  const qB = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
   await new Promise(r => qB.on("connect", r));
   await new Promise(r => { qB.emit("lobby:setName", { name: "Bob" }); qB.once("lobby:state", r); });
 

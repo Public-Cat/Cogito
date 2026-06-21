@@ -96,7 +96,8 @@ function render() {
 function joinLobby() {
   const name = document.getElementById('nameInput').value.trim();
   if (!name) return;
-  socket.emit('lobby:setName', { name });
+  const code = new URLSearchParams(window.location.search).get('code') || undefined;
+  socket.emit('lobby:setName', { name, code });
 }
 
 async function showLobby(state) {
@@ -307,6 +308,7 @@ function renderPlayerList(players) {
 }
 
 socket.on('lobby:state', (state) => {
+  if (state.myToken) localStorage.setItem('cogito_myToken', state.myToken);
   (async () => { await showLobby(state); })();
 });
 
@@ -318,6 +320,7 @@ socket.on('host:assigned', () => {
 socket.on('game:state', (state) => {
   clearScrambles();
   localStorage.setItem('cogito_myId', state.myId || '');
+  if (state.myToken) localStorage.setItem('cogito_myToken', state.myToken);
   window.location.href = 'game.html?myId=' + encodeURIComponent(state.myId || '');
 });
 
@@ -332,6 +335,7 @@ socket.on('error', ({ message }) => {
 
 const urlParams = new URLSearchParams(window.location.search);
 const savedId = urlParams.get('myId') || localStorage.getItem('cogito_myId');
+const savedToken = localStorage.getItem('cogito_myToken');
 if (savedId) {
   let rejoinResolved = false;
 
@@ -339,24 +343,27 @@ if (savedId) {
     rejoinResolved = true;
     clearScrambles();
     localStorage.setItem('cogito_myId', state.myId || '');
+    if (state.myToken) localStorage.setItem('cogito_myToken', state.myToken);
     window.location.href = 'game.html?myId=' + encodeURIComponent(state.myId || '');
   };
 
   const onError = () => {
     rejoinResolved = true;
     localStorage.removeItem('cogito_myId');
+    localStorage.removeItem('cogito_myToken');
     render();
   };
 
   socket.once('game:state', onGameState);
   socket.once('error', onError);
-  socket.emit('game:rejoin', { playerId: savedId });
+  socket.emit('game:rejoin', { playerId: savedId, token: savedToken });
 
   setTimeout(() => {
     if (!rejoinResolved) {
       socket.off('game:state', onGameState);
       socket.off('error', onError);
       localStorage.removeItem('cogito_myId');
+      localStorage.removeItem('cogito_myToken');
       render();
     }
   }, 2000);
