@@ -5,9 +5,11 @@ const socket = io();
 const urlParams = new URLSearchParams(window.location.search);
 let myId = urlParams.get('myId') || localStorage.getItem('cogito_myId') || null;
 let gameState = null;
+const SUBMIT_PHASE_SECONDS = 45;
+
 let voteSoonCountdown = null;
 let voteSoonInterval = null;
-let submitCountdown = 15;
+let submitCountdown = SUBMIT_PHASE_SECONDS;
 let revealCountdown = 10;
 let submitCountdownInterval = null;
 let revealCountdownInterval = null;
@@ -84,7 +86,7 @@ function stopCountdowns() {
 }
 
 function startSubmitCountdown() {
-  submitCountdown = 15;
+  submitCountdown = SUBMIT_PHASE_SECONDS;
   stopCountdowns();
   submitCountdownInterval = setInterval(() => {
     submitCountdown--;

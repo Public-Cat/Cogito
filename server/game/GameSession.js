@@ -5,6 +5,8 @@ import { buildSystemPrompt, buildTurnPrompt, buildRankingPrompt, buildNamePrompt
 
 const PERSONALITIES = ['skeptical', 'enthusiastic', 'thoughtful', 'dry', 'curious', 'anxious'];
 
+const SUBMIT_PHASE_MS = 45000;
+
 const STATES = {
   LOBBY: 'LOBBY',
   SUBMITTING: 'SUBMITTING',
@@ -95,7 +97,7 @@ export class GameSession {
       player.isDisconnected = true;
       if (this.state === STATES.SUBMITTING) {
         this.submittedPlayerIds.delete(player.id);
-        // Don't early-resolve on disconnect — let the 15s timer fire
+        // Don't early-resolve on disconnect — let the submit timer fire
         // so reconnecting players have a window to rejoin. Early resolve
         // still happens via handleHumanSubmit when remaining players submit.
       }
@@ -206,7 +208,7 @@ export class GameSession {
       this.generateAIMessage(ai);
     }
 
-    this.submitTimer = setTimeout(() => this.resolveSubmitPhase(), 15000);
+    this.submitTimer = setTimeout(() => this.resolveSubmitPhase(), SUBMIT_PHASE_MS);
   }
 
   /**
