@@ -3,7 +3,7 @@ services:
     container_name: cogito
     build: .
     networks:
-      - cogito-net
+      - caddy-net
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -17,24 +17,26 @@ services:
       - PORT=3000
       # HOST controls which interface the Node process binds inside the
       # container — it does NOT make this safe to expose on the LAN/WAN.
-      # The actual access restriction is the 127.0.0.1-only port binding
-      # below; only the host (running Caddy) can reach this container.
+      # No port is published to the host at all: the only access path is
+      # the shared `caddy-net` network below, and only your own Caddy
+      # container should be attached to it alongside this one.
       - HOST=0.0.0.0
       # SECURITY: set a real secret here (or via a .env file) before going
       # live — this placeholder is public knowledge. Rotate by changing the
       # value and running `docker compose up -d`.
       - SESSION_CODE=changeme
       # SECURITY: replace with your real public + LAN vhost URLs (must match
-      # the Caddyfile in deploy/Caddyfile). Comma-separated, no spaces.
+      # the vhost blocks you add to your own Caddyfile — see deploy/DEPLOY.md).
+      # Comma-separated, no spaces.
       - ALLOWED_ORIGINS=https://cogito.example.com,https://cogito.home.arpa
-    ports:
-      # Bind to loopback only: nothing on the LAN or 0.0.0.0 can reach this
-      # port directly. Caddy (running on the host) is the only intended
-      # caller, proxying both the public and LAN vhosts to this address.
-      - 127.0.0.1:3008:3000
     restart: unless-stopped
 
 networks:
-  cogito-net:
-    name: cogito-net
-    driver: bridge
+  # External network already used by your own Caddy container/stack — this
+  # repo does not create or manage Caddy. Set `name` to whatever network
+  # your Caddy container is already on (see deploy/DEPLOY.md section 3 for
+  # how to find it), then attach Cogito to it so Caddy can reach it by
+  # container name (`cogito:3000`).
+  caddy-net:
+    external: true
+    name: <your-existing-caddy-network>

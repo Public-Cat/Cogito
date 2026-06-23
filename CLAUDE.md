@@ -87,11 +87,11 @@ CSS lives entirely in `client/css/matrix.css`. No external CSS frameworks.
 
 Designed for public hosting via **Cloudflare Tunnel → Caddy (HTTPS) → app** (no open firewall ports). Three layers:
 
-- **Realm gating (host privileges).** Caddy serves two vhosts and stamps a trusted `X-Cogito-Realm` header (strip-then-set, so clients can't forge it): a public vhost (`origin` header `public`) for friends, and a LAN-only vhost (`lan`, e.g. `cogito.home.arpa`) for the host. `server/index.js` reads the header into `socket.data.realm` (defaults to `public` — fail safe). Only `lan` players can become host or call `lobby:reset` / `game:returnToLobby` (`requireLanHost()` in `handlers.js`). The app binds to `127.0.0.1` (`HOST` env) so the header is only trustworthy because nothing reaches it except Caddy.
+- **Realm gating (host privileges).** Caddy serves two vhosts and stamps a trusted `X-Cogito-Realm` header (strip-then-set, so clients can't forge it): a public vhost (`origin` header `public`) for friends, and a LAN-only vhost (`lan`, e.g. `cogito.home.arpa`) for the host. `server/index.js` reads the header into `socket.data.realm` (defaults to `public` — fail safe). Only `lan` players can become host or call `lobby:reset` / `game:returnToLobby` (`requireLanHost()` in `handlers.js`). This repo does not run Caddy — `cogito` publishes no host port at all, and is only reachable from whatever is attached to the external `caddy-net` Docker network it joins (intended to be just the operator's own Caddy container), which is what makes the header trustworthy.
 - **Public join gate (who can play).** `SESSION_CODE` env: when set, public-realm joins must send a matching `code` in `lobby:setName`; LAN realm bypasses. Unset = no code required (keeps dev/tests working).
 - **Identity / abuse.** Player ids are random UUIDs; each player gets a `rejoinToken` and `game:rejoin` must present `{ playerId, token }`. CORS restricted via `ALLOWED_ORIGINS`. `lobby:start` validates model names against the cached Ollama list, caps AI players at `MAX_AI_PLAYERS` (8), and sanitizes/length-caps `topic`. Per-socket rate limits on `lobby:setName`, `game:sendMessage`, `game:castVote`, `game:rejoin`.
 
-Operator runbook + Caddy/Cloudflare/Docker configs live in `deploy/` (`DEPLOY.md`, `Caddyfile`, `cloudflared-config.yml`).
+Operator runbook + Cloudflare config live in `deploy/` (`DEPLOY.md`, `Caddyfile` — a snippet to add to your own Caddy, not a managed service — `cloudflared-config.yml`).
 
 ## Conventions
 

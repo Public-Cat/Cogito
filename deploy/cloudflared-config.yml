@@ -14,9 +14,10 @@ tunnel: <TUNNEL_ID>
 credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
 
 ingress:
-  # Public vhost only. Caddy terminates TLS for cogito.example.com and
-  # forwards to the app over the loopback-bound Docker port (see
-  # docker-compose.yml: 127.0.0.1:3008:3000).
+  # Public vhost only. This targets wherever your OWN existing Caddy
+  # instance publishes 443 (this repo does not run Caddy) — Caddy then
+  # reverse-proxies to the `cogito` container over the shared `caddy-net`
+  # Docker network (see deploy/DEPLOY.md section 3).
   - hostname: cogito.example.com
     service: https://localhost:443      # Caddy; use noTLSVerify if Caddy uses internal CA
     originRequest:

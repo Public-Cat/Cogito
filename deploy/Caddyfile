@@ -1,15 +1,22 @@
-# Caddyfile for Cogito — two vhosts, split-horizon realm design.
+# Cogito vhost blocks — split-horizon realm design.
+#
+# This is NOT a standalone Caddyfile this repo runs for you. It's a snippet
+# to copy into your OWN existing Caddyfile (the Caddy instance you already
+# run for other services). See deploy/DEPLOY.md section 3 for the full
+# integration steps (sharing a Docker network with this container, etc).
 #
 # Public vhost: fronted by Cloudflare Tunnel, reachable by anyone with the
 # link + SESSION_CODE. LAN vhost: never tunneled, reachable only from the
 # local network (or the host itself), grants host privileges.
 #
 # Replace cogito.example.com with your real public domain before deploying.
-# See deploy/DEPLOY.md for the full runbook.
+# `cogito:3000` below resolves once your Caddy container shares a Docker
+# network with the `cogito` container (the `caddy-net` network in
+# docker-compose.yml) — adjust the target if your setup differs.
 
 # Public — published through Cloudflare Tunnel. Friends reach this.
 cogito.example.com {
-    reverse_proxy 127.0.0.1:3008 {
+    reverse_proxy cogito:3000 {
         # SECURITY: strip-then-set. A client could send its own
         # X-Cogito-Realm header trying to claim "lan" privileges — delete
         # whatever they sent first, then force the correct value. Order
@@ -22,7 +29,7 @@ cogito.example.com {
 # LAN only — never in the Cloudflare Tunnel ingress. Host (you) reaches this.
 cogito.home.arpa {
     tls internal
-    reverse_proxy 127.0.0.1:3008 {
+    reverse_proxy cogito:3000 {
         header_up -X-Cogito-Realm
         header_up X-Cogito-Realm lan       # grants host privileges
     }

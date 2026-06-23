@@ -6,30 +6,36 @@ the host. Read this fully before going live.
 
 ## 1. Overview
 
-Three layers, each independently restricting access:
+This repo does **not** provision or manage Caddy — it assumes you already
+run your own Caddy instance (Docker or host install) fronting other
+services, and shows how to plug Cogito into it.
+
+Two layers, each independently restricting access:
 
 ```
-Internet ──(Cloudflare Tunnel, outbound-only)──► Caddy (HTTPS, host) ──► Docker (127.0.0.1-only) ──► App
-LAN ───────────────────────────────────────────► Caddy (cogito.home.arpa) ──► Docker (127.0.0.1-only) ──► App
+Internet ──(Cloudflare Tunnel, outbound-only)──► Your Caddy ──► Docker network (caddy-net) ──► App
+LAN ───────────────────────────────────────────► Your Caddy (cogito.home.arpa) ──► Docker network (caddy-net) ──► App
 ```
 
 - **Cloudflare Tunnel**: `cloudflared` makes an outbound connection from
   your host to Cloudflare — no inbound firewall ports are ever opened.
   Only `cogito.example.com` is published through it.
-- **Caddy**: runs on the host, terminates TLS for two vhosts:
+- **Your Caddy instance**: terminates TLS for two vhosts (added to your
+  existing Caddyfile — see section 3):
   - `cogito.example.com` — public, reached via the tunnel. Treated as the
     `public` realm. Gated by the in-app `SESSION_CODE`.
   - `cogito.home.arpa` — LAN-only, never tunneled. Treated as the `lan`
     realm, which the app should grant host/admin privileges to.
-- **App/Docker**: the Node app listens inside a container whose port is
-  bound to `127.0.0.1` only (`docker-compose.yml`), so nothing but Caddy
-  on the same host can reach it — not the LAN, not 0.0.0.0.
+- **App/Docker**: the `cogito` container publishes no port to the host at
+  all. It's only reachable from whatever else is attached to the external
+  `caddy-net` Docker network it joins — which should be just your Caddy
+  container.
 
 The split-horizon design means the *hostname you use* determines your
 privilege level. Caddy enforces this by stripping any client-supplied
 `X-Cogito-Realm` header and re-setting it itself per vhost (strip-then-set
 — see `deploy/Caddyfile`). The app must trust this header only because
-Caddy is the sole path to it (port 3008 is loopback-only).
+Caddy is the sole thing on `caddy-net` that can reach it.
 
 ## 2. App environment
 
@@ -50,36 +56,45 @@ Set these in `docker-compose.yml` (or an `.env` file consumed by it):
   ```
 - `HOST=0.0.0.0` — this only controls which network interface the Node
   process binds to *inside the container*. It does **not** expose the app
-  to the LAN or internet. The actual access restriction is the
-  `127.0.0.1:3008:3000` port binding in `docker-compose.yml` — only
-  processes on the host itself (i.e. Caddy) can reach port 3008.
+  to the LAN or internet: no port is published to the host at all. The
+  actual access restriction is that the `cogito` container is only on the
+  external `caddy-net` network — only your Caddy container, also on that
+  network, can reach it.
 
-## 3. Caddy
+## 3. Caddy (integrating with your existing instance)
 
-Install Caddy on the host (not in Docker, so it can bind host ports 80/443
-and reach `127.0.0.1:3008`):
+This repo doesn't run Caddy for you. These steps add Cogito to whatever
+Caddy you already have:
 
-```bash
-# Debian/Ubuntu example
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudflare.com/...' # see your distro's Caddy install docs
-```
-
-Copy `deploy/Caddyfile` to `/etc/caddy/Caddyfile`, edit `cogito.example.com`
-to your real domain, then:
-
-```bash
-sudo systemctl reload caddy
-```
-
-The `cogito.home.arpa` vhost uses `tls internal` — Caddy mints its own
-local CA and a certificate for that name on first run. Trust that CA in
-your **host browser only** (the one you'll use to reach the LAN vhost):
-
-```bash
-# Find and trust Caddy's local root CA (path varies by OS/install)
-caddy trust
-```
+1. **Find your Caddy container's Docker network:**
+   ```bash
+   docker inspect <your-caddy-container> --format '{{json .NetworkSettings.Networks}}'
+   # or: docker network ls   /   docker network inspect <name>
+   ```
+2. **Point `caddy-net` at that network** in `docker-compose.yml`:
+   ```yaml
+   networks:
+     caddy-net:
+       external: true
+       name: <network-name-from-step-1>
+   ```
+   Then `docker compose up -d` to build and attach `cogito` to it.
+3. **Copy the two vhost blocks from `deploy/Caddyfile`** into your own
+   Caddyfile (or an imported snippet file, if your setup uses Caddy's
+   `import` directive). They already target `reverse_proxy cogito:3000`,
+   which resolves now that both containers share a network. Edit
+   `cogito.example.com` to your real domain.
+4. **Reload your Caddy** however you normally do — e.g.
+   `docker exec <your-caddy-container> caddy reload --config /etc/caddy/Caddyfile`,
+   or your existing compose/systemd workflow. Not something this repo
+   dictates.
+5. **`tls internal` CA trust for `cogito.home.arpa`**: if your Caddy
+   already issues other `tls internal` certs you've trusted on the host,
+   there's nothing more to do. Otherwise, extract its root cert from
+   wherever your Caddy persists its data (typically
+   `.../data/caddy/pki/authorities/local/root.crt` inside its data
+   volume/mount) and import it into your host OS/browser trust store —
+   steps vary per OS.
 
 Friends never see this certificate; they only hit the publicly-trusted
 Cloudflare-issued cert on `cogito.example.com`.
@@ -122,50 +137,7 @@ is intentionally absent and must **never** be added to this file. The
 tunnel has no inbound firewall requirement; `cloudflared` only makes
 outbound connections to Cloudflare's edge.
 
-## 6. Container egress restriction (C4)
-
-**Concern**: if the app container is compromised, it should not be able to
-reach other devices on your LAN — only Ollama, which it legitimately needs.
-
-Find the `cogito-net` subnet:
-
-```bash
-docker network inspect cogito-net | grep Subnet
-# e.g. "Subnet": "172.20.0.0/16"
-```
-
-Example `iptables` rules using Docker's `DOCKER-USER` chain (evaluated
-before Docker's own forwarding rules, so it can override them). **Adapt
-the subnet and Ollama IP/port to your environment:**
-
-```bash
-# Allow cogito-net -> Ollama (adjust subnet + Ollama address)
-sudo iptables -I DOCKER-USER -s 172.20.0.0/16 -d 192.168.1.30 -p tcp --dport 11434 -j ACCEPT
-
-# Allow established return traffic (needed for the ACCEPT above to be useful)
-sudo iptables -I DOCKER-USER -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-
-# Drop all other cogito-net -> RFC1918 (LAN) traffic
-sudo iptables -I DOCKER-USER -s 172.20.0.0/16 -d 10.0.0.0/8 -j DROP
-sudo iptables -I DOCKER-USER -s 172.20.0.0/16 -d 172.16.0.0/12 -j DROP
-sudo iptables -I DOCKER-USER -s 172.20.0.0/16 -d 192.168.0.0/16 -j DROP
-
-# (Don't drop 172.16.0.0/12 traffic to the Docker bridge itself if your
-# Ollama happens to live in that range as a container — order the ACCEPT
-# rule for Ollama before the broader DROP rules, as above.)
-```
-
-These rules only constrain `cogito-net` egress; they do not affect the
-loopback path Caddy uses to reach the app (`127.0.0.1:3008`), which never
-traverses `DOCKER-USER`.
-
-**Alternative**: instead of firewall rules, put Ollama on a Docker network
-shared with `cogito-net` (or attach the Ollama container to `cogito-net`)
-and address it by service/container name (e.g.
-`OLLAMA_BASE_URL=http://ollama:11434`). This avoids needing host firewall
-rules at all, at the cost of running Ollama in Docker too.
-
-## 7. Verification checklist
+## 6. Verification checklist
 
 Run these after deploying to confirm each layer behaves as designed:
 
@@ -177,20 +149,19 @@ Run these after deploying to confirm each layer behaves as designed:
    The app must treat this request as `public` — Caddy's `header_up
    -X-Cogito-Realm` strips the attempted spoof before forcing `public`.
 
-2. **Localhost-only publish** (proves the LAN/internet can't bypass Caddy
-   and hit the app directly), from a different LAN machine:
+2. **No host port published** (proves the LAN/internet can't bypass Caddy
+   and hit the app directly):
    ```bash
-   curl http://<host-ip>:3008
+   docker compose port cogito 3000
    ```
-   Expect **connection refused** — the port is bound to `127.0.0.1` only.
-
-3. **Egress restriction** (proves C4 works), from the host:
+   Expect empty output / an error — `cogito` has no published port. Then
+   confirm the shared-network path works instead:
    ```bash
-   docker exec cogito wget -qO- http://192.168.1.30:11434/api/tags   # should succeed
-   docker exec cogito wget -qO- http://<some-other-lan-host>         # should hang/fail
+   docker exec <your-caddy-container> wget -qO- http://cogito:3000
    ```
+   Expect a successful response — this is the *only* way to reach the app.
 
-4. **Full play loop**:
+3. **Full play loop**:
    - A friend opens `https://cogito.example.com/?code=<SESSION_CODE>` and
      joins as a player (public realm).
    - You open `https://cogito.home.arpa` from the host (or another
