@@ -81,7 +81,7 @@ CSS lives entirely in `client/css/matrix.css`. No external CSS frameworks.
 
 **Server → Client**: `lobby:state` (+ per-recipient `myToken`), `host:assigned`, `game:state` (+ per-player `myId`, `myToken`, `submittedBy[]`, `activePlayerCount`), `game:newMessage`, `game:votingSoon`, `game:voteStart`, `game:voteProgress` (`{ votedCount, totalEligible }`, after each human vote), `game:voteResult`, `game:ended`, `error`
 
-`game:state` is emitted after every state transition. `lobby:reset` broadcasts empty `lobby:state` to all sockets; `game:returnToLobby` emits only to the caller. **Both `lobby:reset` and `game:returnToLobby` require a LAN-realm host** (see Security). `myToken` is sent only to its owning socket — never broadcast; the host-only `sessionCode` field on `lobby:state` is likewise sent only to the host's socket.
+`game:state` is emitted after every state transition. Both `lobby:reset` and `game:returnToLobby` broadcast an empty `lobby:state` to **all** sockets so no one is stranded on a defunct end screen; `game:returnToLobby` then sends the caller a second `lobby:state` with `isHost:true`. **Both require a LAN-realm host** (see Security). `myToken` is sent only to its owning socket — never broadcast; the host-only `sessionCode` field on `lobby:state` is likewise sent only to the host's socket.
 
 ### Security & Access Control
 
