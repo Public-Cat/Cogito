@@ -308,7 +308,9 @@ function renderPlayerList(players) {
 }
 
 socket.on('lobby:state', (state) => {
-  if (state.myToken) localStorage.setItem('cogito_myToken', state.myToken);
+  // Token keyed by id so multiple tabs in one browser don't overwrite each
+  // other's secret (see multi-tab collision bug — myId is passed per-tab).
+  if (state.myToken && state.myId) localStorage.setItem('cogito_myToken_' + state.myId, state.myToken);
   (async () => { await showLobby(state); })();
 });
 
@@ -320,7 +322,7 @@ socket.on('host:assigned', () => {
 socket.on('game:state', (state) => {
   clearScrambles();
   localStorage.setItem('cogito_myId', state.myId || '');
-  if (state.myToken) localStorage.setItem('cogito_myToken', state.myToken);
+  if (state.myToken && state.myId) localStorage.setItem('cogito_myToken_' + state.myId, state.myToken);
   window.location.href = 'game.html?myId=' + encodeURIComponent(state.myId || '');
 });
 
@@ -335,7 +337,7 @@ socket.on('error', ({ message }) => {
 
 const urlParams = new URLSearchParams(window.location.search);
 const savedId = urlParams.get('myId') || localStorage.getItem('cogito_myId');
-const savedToken = localStorage.getItem('cogito_myToken');
+const savedToken = savedId ? localStorage.getItem('cogito_myToken_' + savedId) : null;
 if (savedId) {
   let rejoinResolved = false;
 
@@ -343,14 +345,14 @@ if (savedId) {
     rejoinResolved = true;
     clearScrambles();
     localStorage.setItem('cogito_myId', state.myId || '');
-    if (state.myToken) localStorage.setItem('cogito_myToken', state.myToken);
+    if (state.myToken && state.myId) localStorage.setItem('cogito_myToken_' + state.myId, state.myToken);
     window.location.href = 'game.html?myId=' + encodeURIComponent(state.myId || '');
   };
 
   const onError = () => {
     rejoinResolved = true;
     localStorage.removeItem('cogito_myId');
-    localStorage.removeItem('cogito_myToken');
+    localStorage.removeItem('cogito_myToken_' + savedId);
     render();
   };
 
@@ -363,7 +365,7 @@ if (savedId) {
       socket.off('game:state', onGameState);
       socket.off('error', onError);
       localStorage.removeItem('cogito_myId');
-      localStorage.removeItem('cogito_myToken');
+      localStorage.removeItem('cogito_myToken_' + savedId);
       render();
     }
   }, 2000);

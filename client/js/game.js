@@ -4,7 +4,9 @@ const socket = io();
 
 const urlParams = new URLSearchParams(window.location.search);
 let myId = urlParams.get('myId') || localStorage.getItem('cogito_myId') || null;
-let myToken = localStorage.getItem('cogito_myToken') || null;
+// Token is keyed by id so two tabs in one browser don't clobber each other's
+// secret (myId arrives per-tab via the URL param; see multi-tab collision bug).
+let myToken = myId ? localStorage.getItem('cogito_myToken_' + myId) : null;
 let gameState = null;
 const SUBMIT_PHASE_SECONDS = 45;
 
@@ -140,9 +142,9 @@ function updateUI(state) {
     myId = state.myId;
     localStorage.setItem('cogito_myId', state.myId);
   }
-  if (state.myToken) {
+  if (state.myToken && (state.myId || myId)) {
     myToken = state.myToken;
-    localStorage.setItem('cogito_myToken', state.myToken);
+    localStorage.setItem('cogito_myToken_' + (state.myId || myId), state.myToken);
   }
 
   document.getElementById('topicDisplay').textContent = `> ${state.topic || 'no topic'}`;
@@ -374,7 +376,14 @@ function showEndScreen(data) {
     div.style.padding = '4px 0';
     const identity = p.isHuman ? 'HUMAN' : `AI (${p.model || 'unknown'})`;
     const color = p.isHuman ? 'var(--color-primary)' : 'var(--color-warning)';
-    div.innerHTML = `<span>> ${p.name}</span> <span style="color:${color};">${identity}</span>`;
+    // Build with textContent (not innerHTML) so a player name or model string
+    // can never inject markup into the end-screen reveal.
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = `> ${p.name}`;
+    const identitySpan = document.createElement('span');
+    identitySpan.style.color = color;
+    identitySpan.textContent = identity;
+    div.append(nameSpan, document.createTextNode(' '), identitySpan);
     revealDiv.appendChild(div);
   });
 }
