@@ -43,8 +43,11 @@ async function run() {
   console.log('=== UI Interactive Test: Full Frontend ===\n');
 
   const browser = await chromium.launch({ headless: true });
+  // Connect as the trusted LAN realm (what the host gets via Caddy's LAN vhost);
+  // without this header the socket is 'public' realm and can't become host.
   const context = await browser.newContext({
     viewport: { width: 1280, height: 720 },
+    extraHTTPHeaders: { 'X-Cogito-Realm': 'lan' },
   });
 
   const pageA = await context.newPage();
@@ -65,12 +68,16 @@ async function run() {
     console.log('--- Phase 0: Reset ---');
     const resetPage = await context.newPage();
     await resetPage.goto(SERVER, { waitUntil: 'domcontentloaded' });
-    await resetPage.evaluate(() => {
+    await resetPage.evaluate(() => new Promise((resolve) => {
       const s = io();
-      s.emit('game:returnToLobby');
-      s.on('lobby:state', () => s.disconnect());
-    });
-    await sleep(1000);
+      // lobby:reset requires a joined LAN host — join the (empty) session to
+      // become host, then reset it. (The context sends the lan realm header.)
+      s.on('connect', () => s.emit('lobby:setName', { name: 'Resetter' }));
+      s.once('lobby:state', () => {
+        s.emit('lobby:reset');
+        setTimeout(() => { s.disconnect(); resolve(); }, 300);
+      });
+    }));
     await resetPage.close();
 
     // ── PHASE 1: LOBBY ──────────────────────────────────────────
@@ -302,16 +309,18 @@ async function run() {
       );
       console.log('  Voting overlay visible on A');
 
-      // Verify spectator mode shows AI voting message
+      // Verify the voting overlay presents vote targets. Humans now vote
+      // alongside the AIs (combined Borda), so the overlay shows VOTE buttons
+      // for active humans rather than the old AI-only spectator message.
       const voteTimer = await pageA.textContent('#voteTimer');
       console.log(`  Vote timer: ${voteTimer}s`);
 
       await sleep(1000);
-      const spectatorMsg = await pageA.textContent('#voteTargets');
-      console.log(`  Spectator message: ${spectatorMsg}`);
-      console.assert(spectatorMsg.includes('AI players are voting'), 'Should show AI voting message');
+      const voteTargets = await pageA.textContent('#voteTargets');
+      console.log(`  Vote targets: ${voteTargets}`);
+      console.assert(voteTargets && voteTargets.trim().length > 0, 'Voting overlay should show content');
 
-      console.log('  Humans are spectators during AI vote');
+      console.log('  Voting overlay active');
     } else {
       console.log(`  Skipping voting (already in ${finalPhase})`);
     }
@@ -354,11 +363,11 @@ async function run() {
     console.log(`  Return button: ${returnBtn}`);
     console.assert(returnBtn.includes('RETURN TO LOBBY'), 'Return to lobby button should be visible');
 
-    // Click RETURN TO LOBBY on both players
-    console.log('  Clicking RETURN TO LOBBY...');
+    // Only the LAN-realm host can return to the lobby. The server broadcasts
+    // lobby:state to everyone, so the guest (pageB) is sent back automatically
+    // without (and now unable to) trigger its own return.
+    console.log('  Host clicking RETURN TO LOBBY...');
     await pageA.click('#returnBtn');
-    await sleep(500);
-    await pageB.click('#returnBtn');
 
     console.log('');
 

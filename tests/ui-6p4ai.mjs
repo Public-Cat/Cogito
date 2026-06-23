@@ -14,7 +14,8 @@ async function run() {
   console.log(`=== UI Test: ${NUM_HUMANS} Humans + ${NUM_AIS} AIs ===\n`);
 
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  // LAN realm header so the host browser can be promoted (see Security gating).
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, extraHTTPHeaders: { 'X-Cogito-Realm': 'lan' } });
 
   const pages = [];
   for (let i = 0; i < NUM_HUMANS; i++) {
@@ -26,12 +27,17 @@ async function run() {
     console.log('--- Phase 1: Reset ---');
     const resetPage = await context.newPage();
     await resetPage.goto(SERVER, { waitUntil: 'domcontentloaded' });
-    await resetPage.evaluate(() => {
+    await resetPage.evaluate(() => new Promise((resolve) => {
       const s = io();
-      s.emit('game:returnToLobby');
-      s.on('lobby:state', () => s.disconnect());
-    });
-    await sleep(1500);
+      // lobby:reset requires a joined LAN host — join the (empty) session to
+      // become host, then reset it. (The context sends the lan realm header.)
+      s.on('connect', () => s.emit('lobby:setName', { name: 'Resetter' }));
+      s.once('lobby:state', () => {
+        s.emit('lobby:reset');
+        setTimeout(() => { s.disconnect(); resolve(); }, 300);
+      });
+    }));
+    await sleep(1200);
     await resetPage.close();
     console.log('  Session reset OK');
 
@@ -166,6 +172,14 @@ async function run() {
         throw new Error('TIMEOUT after ' + (MAX_DURATION_MS / 1000) + 's');
       }
 
+      // Game end is signalled only by the 'game:ended' event (endOverlay → flex),
+      // not by a phaseDisplay='ENDED' state, so detect it via the overlay.
+      const ended = await pages[0].evaluate(() => {
+        const el = document.getElementById('endOverlay');
+        return !!el && el.style.display === 'flex';
+      });
+      if (ended) { gameEnded = true; break; }
+
       const phase = await pages[0].textContent('#phaseDisplay');
 
       if (phase === 'SUBMITTING') {
@@ -176,7 +190,10 @@ async function run() {
           await submitIfEnabled(pages[i], `${HUMAN_NAMES[i]} discussing the current topic.`);
         }
 
-        await waitForPhase(pages[0], 'REVEALING', 30000);
+        // SUBMITTING is capped at 45s server-side; late rounds with fewer AIs
+        // carrying full history can approach that cap, so wait past it (+margin)
+        // rather than racing the 45s phase with a 30s timeout.
+        await waitForPhase(pages[0], 'REVEALING', 55000);
         const msgs = await pages[0].$$('#messages > *');
         console.log(`  REVEALING round ${roundCount}: ${msgs.length} messages`);
 
@@ -197,8 +214,12 @@ async function run() {
           { timeout: 20000 }
         );
 
-        const spectatorMsg = await pages[0].textContent('#voteTargets');
-        console.assert(spectatorMsg.includes('AI players are voting'), 'Should show AI voting message');
+        // Humans now vote alongside the AIs (combined Borda); the overlay shows
+        // vote targets for active humans (the host may already be eliminated and
+        // spectating), so just verify the overlay has content rather than a
+        // stale AI-only message.
+        const voteTargets = await pages[0].textContent('#voteTargets');
+        console.assert(voteTargets && voteTargets.trim().length > 0, 'Voting overlay should show content');
 
         // Wait for vote resolution + post-vote transition
         // After voteResult, 3s delay, then either SUBMITTING or ENDED
@@ -206,12 +227,15 @@ async function run() {
         const afterVote = await pages[0].textContent('#phaseDisplay');
         console.log(`  After vote: ${afterVote}`);
 
-        // If still in VOTING, wait for the transition
+        // If still in VOTING, wait for the next round (SUBMITTING) or game end.
+        // Game end shows the endOverlay rather than a phaseDisplay='ENDED' state.
         if (afterVote === 'VOTING') {
           await pages[0].waitForFunction(
             () => {
               const el = document.getElementById('phaseDisplay');
-              return el && ['SUBMITTING', 'ENDED'].includes(el.textContent);
+              const end = document.getElementById('endOverlay');
+              return (el && el.textContent === 'SUBMITTING') ||
+                     (end && end.style.display === 'flex');
             },
             undefined, { timeout: 30000 }
           );
@@ -248,14 +272,9 @@ async function run() {
     // ── PHASE 5: RETURN TO LOBBY ────────────────────────────────
     console.log('--- Phase 5: Return to Lobby ---');
 
-    await pages[0].evaluate(() => {
-      const s = io();
-      s.emit('game:returnToLobby');
-      s.on('lobby:state', () => {
-        window.location.href = 'index.html';
-        s.disconnect();
-      });
-    });
+    // Host (pages[0]) returns to lobby via the real end-screen button — its
+    // socket is the joined LAN host, so the server accepts it and broadcasts.
+    await pages[0].click('#returnBtn');
 
     await pages[0].waitForSelector('#joinPanel', { state: 'attached', timeout: 10000 });
     await pages[0].fill('#nameInput', HUMAN_NAMES[0]);

@@ -51,7 +51,7 @@ Tests are plain Node scripts — no test framework. They exit `process.exit(0|1)
 ### Game State Machine
 
 ```
-LOBBY → SUBMITTING (15s) → REVEALING (10s) → [loop if round<2] → VOTING_SOON (5s) → VOTING (10s) → [3s delay] → SUBMITTING or ENDED
+LOBBY → SUBMITTING (45s) → REVEALING (10s) → [loop if round<2] → VOTING_SOON (5s) → VOTING (20s) → [3s delay] → SUBMITTING or ENDED
 ```
 
 Minimum **2 humans + 1 AI** to start. Voting begins at round ≥ 2.
@@ -61,7 +61,7 @@ Minimum **2 humans + 1 AI** to start. Voting begins at round ≥ 2.
 ### AI Behavior
 
 - **Message generation**: All AIs run `generateAIMessage()` in parallel during SUBMITTING. Each AI gets `[...messageHistory, turnPrompt]` sent to Ollama; the turn prompt is not appended to history until after a successful reply. After all messages are revealed, each AI's history gets a single `user` transcript entry with other players' messages from that round.
-- **Voting (combined AI + human Borda count)**: `collectAIRankings()` runs all AI rankings in parallel (`Promise.allSettled`, 10s timeout); each AI ranks all active players from most suspicious to least (position 0 = N-1 points, ..., last = 0). In parallel, each active, connected human casts one vote via `game:castVote` → `castHumanVote()`, counted as a full first-place pick (N-1 points), same weight as an AI's top choice. Self-votes and votes from eliminated/disconnected players are rejected. All points sum into one score; highest eliminated. No early-resolve — votes collected for the full 10s window, then `resolveRankings()`. Tiebreaker 1: ranked/voted highest (earliest) in more individual AI rankings or human votes. Tiebreaker 2: cumulative Borda history across all prior rounds. If still tied, no elimination.
+- **Voting (combined AI + human Borda count)**: `collectAIRankings()` runs all AI rankings in parallel (`Promise.allSettled`, 20s timeout); each AI ranks all active players from most suspicious to least (position 0 = N-1 points, ..., last = 0). In parallel, each active, connected human casts one vote via `game:castVote` → `castHumanVote()`, counted as a full first-place pick (N-1 points), same weight as an AI's top choice. Self-votes and votes from eliminated/disconnected players are rejected. All points sum into one score; highest eliminated. No early-resolve — votes collected for the full 20s window, then `resolveRankings()`. Tiebreaker 1: ranked/voted highest (earliest) in more individual AI rankings or human votes. Tiebreaker 2: cumulative Borda history across all prior rounds. If still tied, no elimination.
 - **Prompts**: `buildSystemPrompt`, `buildTurnPrompt`, `buildRankingPrompt`, `buildNamePrompt` — all in `prompts.js`.
 
 ### Frontend (`client/`)

@@ -3,6 +3,10 @@ import gameManager from '../game/GameManager.js';
 import { getCachedModels } from '../ollama/OllamaClient.js';
 
 const NAME_REGEX = /^[a-zA-Z0-9 ]{1,20}$/;
+// Ollama model names: word chars plus the separators real tags/namespaces use
+// (`qwen2.5:7b`, `registry/library/llama3:latest`). Excludes <>&"' and spaces,
+// so a model string can never carry HTML into the client end-screen render.
+const MODEL_REGEX = /^[\w.:/-]{1,100}$/;
 const MAX_MESSAGE_LENGTH = 500;
 const MAX_AI_PLAYERS = 8;
 const MAX_TOPIC_LENGTH = 120;
@@ -135,11 +139,9 @@ export function registerHandlers(io, socket) {
   socket.on('lobby:start', async ({ topic, aiPlayers } = {}, callback) => {
     try {
       const session = gameManager.getOrCreateSession();
-      const player = session.getPlayerBySocket(socket.id);
-      if (!player || !player.isHost) {
-        socket.emit('error', { message: 'Only the host can start the game.' });
-        return;
-      }
+      // Starting a game is a privileged host action — gate it on the LAN realm
+      // like lobby:reset / game:returnToLobby, not just on isHost.
+      if (!requireLanHost(session, socket)) return;
 
       const humans = session.players.filter(p => p.isHuman);
 
@@ -158,9 +160,9 @@ export function registerHandlers(io, socket) {
         return;
       }
 
-      const wellFormed = aiPlayers.every(cfg => cfg && typeof cfg === 'object' && typeof cfg.model === 'string' && cfg.model.length > 0);
+      const wellFormed = aiPlayers.every(cfg => cfg && typeof cfg === 'object' && typeof cfg.model === 'string' && MODEL_REGEX.test(cfg.model));
       if (!wellFormed) {
-        socket.emit('error', { message: 'Each AI player must specify a model.' });
+        socket.emit('error', { message: 'Each AI player must specify a valid model.' });
         return;
       }
 
@@ -290,6 +292,15 @@ export function registerHandlers(io, socket) {
       const session = gameManager.getSession();
       if (!session || !requireLanHost(session, socket)) return;
       gameManager.reset();
+      // The host ending the game wipes the single shared session. Notify every
+      // socket so all players return to the lobby instead of being stranded on
+      // a now-defunct end screen (guests can no longer self-trigger this, since
+      // it's LAN-host gated). The caller gets isHost:true as the returning host.
+      io.emit('lobby:state', {
+        players: [],
+        models: [],
+        isHost: false,
+      });
       socket.emit('lobby:state', {
         players: [],
         models: [],
