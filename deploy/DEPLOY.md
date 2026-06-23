@@ -18,7 +18,8 @@ LAN ─────────────────────────�
   Only `cogito.example.com` is published through it.
 - **Caddy**: runs on the host, terminates TLS for two vhosts:
   - `cogito.example.com` — public, reached via the tunnel. Treated as the
-    `public` realm. Gated by the in-app `SESSION_CODE`.
+    `public` realm. Gated by the per-session join code (auto-generated and
+    shown to the host in the lobby).
   - `cogito.home.arpa` — LAN-only, never tunneled. Treated as the `lan`
     realm, which the app should grant host/admin privileges to.
 - **App/Docker**: the Node app listens inside a container whose port is
@@ -35,13 +36,12 @@ Caddy is the sole path to it (port 3008 is loopback-only).
 
 Set these in `docker-compose.yml` (or an `.env` file consumed by it):
 
-- `SESSION_CODE` — shared secret friends need to join via the public link
-  (e.g. `https://cogito.example.com/?code=...`). **Change the `changeme`
-  placeholder before going live.** Rotate at any time by editing the env
-  value and running:
-  ```bash
-  docker compose up -d
-  ```
+- Join code — **not** an env var. A random 6-character code is generated per
+  session when the LAN host joins, and shown only to the host in the lobby.
+  Friends enter it on the join screen (or open
+  `https://cogito.example.com/?code=<CODE>`, which prefills it). A new code is
+  generated whenever the host resets / returns to the lobby. There is nothing
+  to configure or rotate.
 - `ALLOWED_ORIGINS` — comma-separated list of origins allowed to connect
   (CORS / Socket.IO origin check). Must list **both** vhost URLs exactly as
   friends/you will use them:
@@ -191,9 +191,10 @@ Run these after deploying to confirm each layer behaves as designed:
    ```
 
 4. **Full play loop**:
-   - A friend opens `https://cogito.example.com/?code=<SESSION_CODE>` and
-     joins as a player (public realm).
    - You open `https://cogito.home.arpa` from the host (or another
-     CA-trusted machine on the LAN) and join with host privileges.
+     CA-trusted machine on the LAN) and join with host privileges. Read the
+     session code shown in the lobby and share it.
+   - A friend opens `https://cogito.example.com/?code=<CODE>` (or enters the
+     code on the join screen) and joins as a player (public realm).
    - Confirm both can see the same lobby/game state, and that only the
      `lan`-realm session gets host controls.

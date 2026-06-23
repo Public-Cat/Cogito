@@ -20,10 +20,6 @@ services:
       # The actual access restriction is the 127.0.0.1-only port binding
       # below; only the host (running Caddy) can reach this container.
       - HOST=0.0.0.0
-      # SECURITY: set a real secret here (or via a .env file) before going
-      # live — this placeholder is public knowledge. Rotate by changing the
-      # value and running `docker compose up -d`.
-      - SESSION_CODE=changeme
       # SECURITY: replace with your real public + LAN vhost URLs (must match
       # the Caddyfile in deploy/Caddyfile). Comma-separated, no spaces.
       - ALLOWED_ORIGINS=https://cogito.example.com,https://cogito.home.arpa
