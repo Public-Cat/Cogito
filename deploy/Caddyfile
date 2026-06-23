@@ -10,9 +10,9 @@
 # local network (or the host itself), grants host privileges.
 #
 # Replace cogito.example.com with your real public domain before deploying.
-# `cogito:3000` below resolves once your Caddy container shares a Docker
-# network with the `cogito` container (the `caddy-net` network in
-# docker-compose.yml) — adjust the target if your setup differs.
+# `cogito:3000` below resolves once your Caddy container is attached to the
+# `cogito-net` Docker network (defined in docker-compose.yml) — see
+# deploy/DEPLOY.md section 3 for how to connect your Caddy container to it.
 
 # Public — published through Cloudflare Tunnel. Friends reach this.
 cogito.example.com {

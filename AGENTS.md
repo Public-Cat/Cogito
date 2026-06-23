@@ -81,7 +81,7 @@ Full `game:state` emitted after every state transition. `game:ended.players` inc
 
 ## Security / access control
 Built for public hosting via **Cloudflare Tunnel → Caddy → app**. See `deploy/DEPLOY.md`, `deploy/Caddyfile`, `deploy/cloudflared-config.yml`.
-- **Realm**: `server/index.js` sets `socket.data.realm` from the `X-Cogito-Realm` header (`'lan'` only if exactly `lan`, else `'public'` — fail safe). Caddy strip-then-sets this header per vhost; this repo doesn't run Caddy itself — `cogito` publishes no host port and is only reachable from the external `caddy-net` Docker network it joins (intended to hold just the operator's own Caddy container), which is what makes the header trustworthy. Only `lan` humans can become host (`assignHost()` filters by realm).
+- **Realm**: `server/index.js` sets `socket.data.realm` from the `X-Cogito-Realm` header (`'lan'` only if exactly `lan`, else `'public'` — fail safe). Caddy strip-then-sets this header per vhost; this repo doesn't run Caddy itself — `cogito` publishes no host port and is only reachable from the `cogito-net` Docker network (the operator connects their own Caddy container to it, see `deploy/DEPLOY.md`), which is what makes the header trustworthy. Only `lan` humans can become host (`assignHost()` filters by realm).
 - **Join gate**: `SESSION_CODE` env — when set, public-realm `lobby:setName` must send a matching `code`; LAN bypasses; unset = no code (tests/dev keep working).
 - **Identity**: `generatePlayerId()` = random UUID; per-player `rejoinToken`; `game:rejoin` verifies `{ playerId, token }`.
 - **Limits**: CORS `ALLOWED_ORIGINS`; `lobby:start` validates models vs cached Ollama list (skipped if cache empty), caps AI at `MAX_AI_PLAYERS=8`, sanitizes/caps `topic` (≤120); `promisePool` caps Ollama concurrency at 4; per-socket rate limits on `lobby:setName`, `game:sendMessage`, `game:castVote`, `game:rejoin`.
@@ -92,8 +92,8 @@ Built for public hosting via **Cloudflare Tunnel → Caddy → app**. See `deplo
 - On failure, returns `"..."` — does not crash.
 
 ## Docker
-- `node:20-alpine`, `npm ci --omit=dev`, runs as non-root (`USER node`). Service `cogito` publishes no host port; reachable only via the external `caddy-net` Docker network shared with the operator's own pre-existing Caddy instance (see `deploy/DEPLOY.md`) — `read_only: true` + `tmpfs: /tmp`, `cap_drop: ALL`, `no-new-privileges:true`, `restart: unless-stopped`.
-- Env: `HOST=0.0.0.0` (listen on the container interface; isolation comes from having no published port and being on `caddy-net`, not from HOST), plus `SESSION_CODE`, `ALLOWED_ORIGINS`, `OLLAMA_BASE_URL`. Set real values before deploying (see `deploy/DEPLOY.md`).
+- `node:20-alpine`, `npm ci --omit=dev`, runs as non-root (`USER node`). Service `cogito` publishes no host port; reachable only via the `cogito-net` Docker network, which the operator connects their own pre-existing Caddy container to (see `deploy/DEPLOY.md`) — `read_only: true` + `tmpfs: /tmp`, `cap_drop: ALL`, `no-new-privileges:true`, `restart: unless-stopped`.
+- Env: `HOST=0.0.0.0` (listen on the container interface; isolation comes from having no published port and being on `cogito-net`, not from HOST), plus `SESSION_CODE`, `ALLOWED_ORIGINS`, `OLLAMA_BASE_URL`. Set real values before deploying (see `deploy/DEPLOY.md`).
 - `.dockerignore` excludes `*.md` but preserves `!RULES.md` — `RULES.md` is included in the image to serve via `GET /api/rules`.
 
 ## Historical bugs (don't reintroduce)

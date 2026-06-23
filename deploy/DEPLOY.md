@@ -13,8 +13,8 @@ services, and shows how to plug Cogito into it.
 Two layers, each independently restricting access:
 
 ```
-Internet ──(Cloudflare Tunnel, outbound-only)──► Your Caddy ──► Docker network (caddy-net) ──► App
-LAN ───────────────────────────────────────────► Your Caddy (cogito.home.arpa) ──► Docker network (caddy-net) ──► App
+Internet ──(Cloudflare Tunnel, outbound-only)──► Your Caddy ──► Docker network (cogito-net) ──► App
+LAN ───────────────────────────────────────────► Your Caddy (cogito.home.arpa) ──► Docker network (cogito-net) ──► App
 ```
 
 - **Cloudflare Tunnel**: `cloudflared` makes an outbound connection from
@@ -27,15 +27,15 @@ LAN ─────────────────────────�
   - `cogito.home.arpa` — LAN-only, never tunneled. Treated as the `lan`
     realm, which the app should grant host/admin privileges to.
 - **App/Docker**: the `cogito` container publishes no port to the host at
-  all. It's only reachable from whatever else is attached to the external
-  `caddy-net` Docker network it joins — which should be just your Caddy
-  container.
+  all. It's only reachable from whatever else is attached to the
+  `cogito-net` Docker network it's on (defined in `docker-compose.yml`) —
+  which should be just your Caddy container, connected per section 3.
 
 The split-horizon design means the *hostname you use* determines your
 privilege level. Caddy enforces this by stripping any client-supplied
 `X-Cogito-Realm` header and re-setting it itself per vhost (strip-then-set
 — see `deploy/Caddyfile`). The app must trust this header only because
-Caddy is the sole thing on `caddy-net` that can reach it.
+Caddy is the sole thing on `cogito-net` that can reach it.
 
 ## 2. App environment
 
@@ -58,31 +58,40 @@ Set these in `docker-compose.yml` (or an `.env` file consumed by it):
   process binds to *inside the container*. It does **not** expose the app
   to the LAN or internet: no port is published to the host at all. The
   actual access restriction is that the `cogito` container is only on the
-  external `caddy-net` network — only your Caddy container, also on that
-  network, can reach it.
+  `cogito-net` network — only your Caddy container, once connected to it
+  (see section 3), can reach it.
 
 ## 3. Caddy (integrating with your existing instance)
 
-This repo doesn't run Caddy for you. These steps add Cogito to whatever
-Caddy you already have:
+This repo doesn't run Caddy for you. `docker-compose.yml` defines the
+`cogito-net` Docker network Cogito sits on; these steps connect your
+existing Caddy container to it:
 
-1. **Find your Caddy container's Docker network:**
+1. **Bring Cogito up** so `cogito-net` exists:
    ```bash
-   docker inspect <your-caddy-container> --format '{{json .NetworkSettings.Networks}}'
-   # or: docker network ls   /   docker network inspect <name>
+   docker compose up -d
    ```
-2. **Point `caddy-net` at that network** in `docker-compose.yml`:
+2. **Connect your Caddy container to `cogito-net`** so it can reach
+   `cogito` by name:
+   ```bash
+   docker network connect cogito-net <your-caddy-container>
+   ```
+   If your Caddy runs via its own `docker-compose.yml`, you can instead add
+   `cogito-net` as an external network there so it reconnects automatically
+   on every `up`:
    ```yaml
+   services:
+     caddy:
+       networks:
+         - cogito-net   # plus whatever networks it already has
    networks:
-     caddy-net:
+     cogito-net:
        external: true
-       name: <network-name-from-step-1>
    ```
-   Then `docker compose up -d` to build and attach `cogito` to it.
 3. **Copy the two vhost blocks from `deploy/Caddyfile`** into your own
    Caddyfile (or an imported snippet file, if your setup uses Caddy's
    `import` directive). They already target `reverse_proxy cogito:3000`,
-   which resolves now that both containers share a network. Edit
+   which resolves now that both containers share `cogito-net`. Edit
    `cogito.example.com` to your real domain.
 4. **Reload your Caddy** however you normally do — e.g.
    `docker exec <your-caddy-container> caddy reload --config /etc/caddy/Caddyfile`,
@@ -155,7 +164,7 @@ Run these after deploying to confirm each layer behaves as designed:
    docker compose port cogito 3000
    ```
    Expect empty output / an error — `cogito` has no published port. Then
-   confirm the shared-network path works instead:
+   confirm the `cogito-net` path works instead:
    ```bash
    docker exec <your-caddy-container> wget -qO- http://cogito:3000
    ```

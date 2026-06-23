@@ -3,7 +3,7 @@ services:
     container_name: cogito
     build: .
     networks:
-      - caddy-net
+      - cogito-net
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -18,8 +18,9 @@ services:
       # HOST controls which interface the Node process binds inside the
       # container — it does NOT make this safe to expose on the LAN/WAN.
       # No port is published to the host at all: the only access path is
-      # the shared `caddy-net` network below, and only your own Caddy
-      # container should be attached to it alongside this one.
+      # the `cogito-net` network below. Connect your own Caddy container to
+      # `cogito-net` (see deploy/DEPLOY.md section 3) — don't attach
+      # anything else to it.
       - HOST=0.0.0.0
       # SECURITY: set a real secret here (or via a .env file) before going
       # live — this placeholder is public knowledge. Rotate by changing the
@@ -32,11 +33,10 @@ services:
     restart: unless-stopped
 
 networks:
-  # External network already used by your own Caddy container/stack — this
-  # repo does not create or manage Caddy. Set `name` to whatever network
-  # your Caddy container is already on (see deploy/DEPLOY.md section 3 for
-  # how to find it), then attach Cogito to it so Caddy can reach it by
-  # container name (`cogito:3000`).
-  caddy-net:
-    external: true
-    name: <your-existing-caddy-network>
+  # This repo does not create or manage Caddy — it just defines the network
+  # Caddy needs to join to reach Cogito by container name (`cogito:3000`).
+  # See deploy/DEPLOY.md section 3 for how to attach your existing Caddy
+  # container to this network.
+  cogito-net:
+    name: cogito-net
+    driver: bridge
