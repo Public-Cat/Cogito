@@ -29,7 +29,7 @@ npx playwright install chromium
 docker compose up --build
 ```
 
-Tests are plain Node scripts — no test framework. They exit `process.exit(0|1)`. Tests connect to `http://192.168.1.32:3000` (dev port 3000, not Docker port 3008). The host client must connect with `extraHeaders: { 'X-Cogito-Realm': 'lan' }` or no one can become host (see Security). After each test, reset server state with `lobby:reset` or `game:returnToLobby` — both now require a joined LAN-realm host. `tests/security.mjs` covers the access-control surface. Don't set `SESSION_CODE` in the test env (keeps the join gate bypassed). Don't run test scripts concurrently against one server — the single in-memory session leaves stale state.
+Tests are plain Node scripts — no test framework. They exit `process.exit(0|1)`. Tests connect to `http://192.168.1.32:3000` (dev port 3000, not Docker port 3008). The host client must connect with `extraHeaders: { 'X-Cogito-Realm': 'lan' }` or no one can become host (see Security). After each test, reset server state with `lobby:reset` or `game:returnToLobby` — both now require a joined LAN-realm host. `tests/security.mjs` covers the access-control surface. The public join gate uses a per-session code that's auto-generated and sent only to the host; LAN-realm clients (what the tests use) bypass it, so most tests are unaffected — a public test join must read the code from the host's `lobby:state` first (see `security.mjs` Scenario 4). Don't run test scripts concurrently against one server — the single in-memory session leaves stale state.
 
 ## Architecture
 
@@ -81,14 +81,14 @@ CSS lives entirely in `client/css/matrix.css`. No external CSS frameworks.
 
 **Server → Client**: `lobby:state` (+ per-recipient `myToken`), `host:assigned`, `game:state` (+ per-player `myId`, `myToken`, `submittedBy[]`, `activePlayerCount`), `game:newMessage`, `game:votingSoon`, `game:voteStart`, `game:voteProgress` (`{ votedCount, totalEligible }`, after each human vote), `game:voteResult`, `game:ended`, `error`
 
-`game:state` is emitted after every state transition. `lobby:reset` broadcasts empty `lobby:state` to all sockets; `game:returnToLobby` emits only to the caller. **Both `lobby:reset` and `game:returnToLobby` require a LAN-realm host** (see Security). `myToken` is sent only to its owning socket — never broadcast.
+`game:state` is emitted after every state transition. `lobby:reset` broadcasts empty `lobby:state` to all sockets; `game:returnToLobby` emits only to the caller. **Both `lobby:reset` and `game:returnToLobby` require a LAN-realm host** (see Security). `myToken` is sent only to its owning socket — never broadcast; the host-only `sessionCode` field on `lobby:state` is likewise sent only to the host's socket.
 
 ### Security & Access Control
 
 Designed for public hosting via **Cloudflare Tunnel → Caddy (HTTPS) → app** (no open firewall ports). Three layers:
 
 - **Realm gating (host privileges).** Caddy serves two vhosts and stamps a trusted `X-Cogito-Realm` header (strip-then-set, so clients can't forge it): a public vhost (`origin` header `public`) for friends, and a LAN-only vhost (`lan`, e.g. `cogito.home.arpa`) for the host. `server/index.js` reads the header into `socket.data.realm` (defaults to `public` — fail safe). Only `lan` players can become host or call `lobby:reset` / `game:returnToLobby` (`requireLanHost()` in `handlers.js`). This repo does not run Caddy — `cogito` publishes no host port at all, and is only reachable from whatever is attached to the `cogito-net` Docker network (the operator connects their own Caddy container to it, see `deploy/DEPLOY.md`), which is what makes the header trustworthy.
-- **Public join gate (who can play).** `SESSION_CODE` env: when set, public-realm joins must send a matching `code` in `lobby:setName`; LAN realm bypasses. Unset = no code required (keeps dev/tests working).
+- **Public join gate (who can play).** A random 6-character join code (`A-Z`+`2-9`, ambiguous chars removed) is generated per session in the `GameSession` constructor and shown only to the host (host-only `sessionCode` on `lobby:state`). Public-realm joins must send a matching `code` in `lobby:setName` against the **existing** session — public players can't create a session, so nothing is joinable until a LAN host has joined (LAN bypasses the check and is what creates the session). A new code is generated on every reset / return-to-lobby. No env var.
 - **Identity / abuse.** Player ids are random UUIDs; each player gets a `rejoinToken` and `game:rejoin` must present `{ playerId, token }`. CORS restricted via `ALLOWED_ORIGINS`. `lobby:start` validates model names against the cached Ollama list, caps AI players at `MAX_AI_PLAYERS` (8), and sanitizes/length-caps `topic`. Per-socket rate limits on `lobby:setName`, `game:sendMessage`, `game:castVote`, `game:rejoin`.
 
 Operator runbook + Cloudflare config live in `deploy/` (`DEPLOY.md`, `Caddyfile` — a snippet to add to your own Caddy, not a managed service — `cloudflared-config.yml`).

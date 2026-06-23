@@ -38,12 +38,18 @@ function render() {
       <div id="joinPanel">
         <label for="nameInput">enter designation:</label><br>
         <input type="text" id="nameInput" maxlength="20" placeholder="your name" style="width:100%;margin:8px 0;">
+        <label for="codeInput">session code:</label><br>
+        <input type="text" id="codeInput" maxlength="6" placeholder="code from your host (friends only)" style="width:100%;margin:8px 0;text-transform:uppercase;">
         <button id="joinBtn" style="width:100%;">> JOIN</button>
       </div>
       <div id="lobbyContent" style="display:none;">
         <div id="waitingMsg" style="color:var(--color-text-dim);">waiting for host to start...</div>
         <div id="hostPanel" style="display:none;">
           <h2>host controls</h2>
+          <div id="sessionCodeBox" style="margin-bottom:12px;color:var(--color-text-dim);">
+            share code: <span id="sessionCodeText" style="color:var(--color-text);font-weight:bold;letter-spacing:2px;"></span>
+            <button id="copyCodeBtn" style="margin-left:8px;">> COPY</button>
+          </div>
           <label for="topicSelect">topic:</label>
           <select id="topicSelect" style="width:100%;margin:4px 0 12px;"></select>
           <div id="aiConfig"></div>
@@ -65,6 +71,12 @@ function render() {
   document.getElementById('nameInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') joinLobby();
   });
+  document.getElementById('codeInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') joinLobby();
+  });
+  // Prefill the code from an invite URL (?code=ABC123) if present.
+  const urlCode = new URLSearchParams(window.location.search).get('code');
+  if (urlCode) document.getElementById('codeInput').value = urlCode.toUpperCase();
   document.getElementById('resetBtn').addEventListener('click', () => {
     if (confirm('Reset all sessions and kick all players?')) {
       socket.emit('lobby:reset');
@@ -96,7 +108,8 @@ function render() {
 function joinLobby() {
   const name = document.getElementById('nameInput').value.trim();
   if (!name) return;
-  const code = new URLSearchParams(window.location.search).get('code') || undefined;
+  const code = document.getElementById('codeInput').value.trim().toUpperCase()
+    || new URLSearchParams(window.location.search).get('code') || undefined;
   socket.emit('lobby:setName', { name, code });
 }
 
@@ -132,6 +145,22 @@ async function showLobby(state) {
 }
 
 async function setupHostPanel(state) {
+  // Show the host the join code and wire a clipboard copy. Use .onclick (not
+  // addEventListener) so repeated lobby:state calls don't stack listeners.
+  if (state.sessionCode) {
+    document.getElementById('sessionCodeText').textContent = state.sessionCode;
+    const copyBtn = document.getElementById('copyCodeBtn');
+    copyBtn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(state.sessionCode);
+        copyBtn.textContent = '> COPIED';
+        setTimeout(() => { copyBtn.textContent = '> COPY'; }, 1500);
+      } catch {
+        copyBtn.textContent = '> ' + state.sessionCode;
+      }
+    };
+  }
+
   // Replace start button to strip stale listeners (accumulated from repeated lobby:state calls)
   const oldBtn = document.getElementById('startBtn');
   if (oldBtn) {

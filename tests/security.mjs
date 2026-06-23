@@ -37,15 +37,16 @@ async function main() {
     hostSock.once("lobby:state", r);
   });
   if (!hostState.isHost) throw new Error("S1 FAIL: HostAlice should be host (lan realm)");
+  if (!hostState.sessionCode) throw new Error("S1 FAIL: host should receive sessionCode");
   t("HostAlice joined as host (lan realm)");
 
-  // Public-realm, non-host socket. Pass SESSION_CODE if this test run has one
-  // set, so this join succeeds regardless of the code gate (irrelevant to the
-  // authorization checks this scenario is testing — that's Scenario 4's job).
+  // Public-realm, non-host socket. Pass the host's generated session code so
+  // this join clears the gate (the code gate itself is Scenario 4's job; here
+  // we only care about the privileged-action authorization checks below).
   const publicSock = io(BASE);
   await new Promise(r => publicSock.on("connect", r));
   await new Promise(r => {
-    publicSock.emit("lobby:setName", { name: "PublicBob", code: process.env.SESSION_CODE });
+    publicSock.emit("lobby:setName", { name: "PublicBob", code: hostState.sessionCode });
     publicSock.once("lobby:state", r);
   });
   t("PublicBob joined (public realm, non-host)");
@@ -202,71 +203,84 @@ async function main() {
   tB.disconnect();
 
   // ─────────────────────────────────────────────────────────────
-  // SCENARIO 4: Session code gate (only meaningful if SESSION_CODE set)
+  // SCENARIO 4: Auto-generated session code gate
   // ─────────────────────────────────────────────────────────────
   console.log("--- Scenario 4: Session code gate ---\n");
-  if (!process.env.SESSION_CODE) {
-    t("SESSION_CODE not set in this test run — code gate is bypassed for public joins.");
-    t("Verifying a public-realm join with no code still succeeds (gate is off)...");
-    const noCodeSock = io(BASE);
-    await new Promise(r => noCodeSock.on("connect", r));
-    const noCodeState = await new Promise(r => {
-      noCodeSock.emit("lobby:setName", { name: "NoCodeUser" });
-      noCodeSock.once("lobby:state", r);
-    });
-    if (!noCodeState.players || noCodeState.players.length < 1) {
-      throw new Error("S4 FAIL: public join without code should succeed when SESSION_CODE is unset");
-    }
-    t("Public join without code succeeded as expected (SESSION_CODE unset)");
-    noCodeSock.emit("lobby:reset");
-    await sleep(300);
-    noCodeSock.disconnect();
-    console.log("  PASS (gate bypassed — SESSION_CODE not configured for this run)\n");
-  } else {
-    // Wrong code
-    const wrongCodeSock = io(BASE);
-    await new Promise(r => wrongCodeSock.on("connect", r));
-    const wrongCodeErr = await new Promise(r => {
-      wrongCodeSock.once("error", r);
-      wrongCodeSock.emit("lobby:setName", { name: "WrongCodeUser", code: "definitely-wrong" });
-      setTimeout(() => r(null), 1500);
-    });
-    if (!wrongCodeErr) throw new Error("S4 FAIL: wrong code should be rejected");
-    t("Wrong code correctly rejected: " + wrongCodeErr.message);
-    wrongCodeSock.disconnect();
+  // Scenario 3 ended with game:returnToLobby, which nulls the session — so no
+  // session exists yet. The code is generated when the LAN host creates one.
 
-    // Correct code
-    const rightCodeSock = io(BASE);
-    await new Promise(r => rightCodeSock.on("connect", r));
-    const rightCodeState = await new Promise(r => {
-      rightCodeSock.emit("lobby:setName", { name: "RightCodeUser", code: process.env.SESSION_CODE });
-      rightCodeSock.once("lobby:state", r);
-    });
-    if (!rightCodeState.players || rightCodeState.players.length < 1) {
-      throw new Error("S4 FAIL: correct code should be accepted");
-    }
-    t("Correct code accepted");
-    rightCodeSock.emit("lobby:reset");
-    await sleep(300);
-    rightCodeSock.disconnect();
+  // 4a: public join before any session exists → rejected (no code can be right)
+  const s4noSession = io(BASE);
+  await new Promise(r => s4noSession.on("connect", r));
+  const noSessionErr = await new Promise(r => {
+    s4noSession.once("error", r);
+    s4noSession.emit("lobby:setName", { name: "EarlyBird", code: "ABC234" });
+    setTimeout(() => r(null), 1500);
+  });
+  if (!noSessionErr) throw new Error("S4 FAIL: public join before any session should be rejected");
+  t("Public join before host/session correctly rejected: " + noSessionErr.message);
+  s4noSession.disconnect();
 
-    // LAN realm bypasses code entirely
-    const lanBypassSock = io(BASE, LAN_HEADERS);
-    await new Promise(r => lanBypassSock.on("connect", r));
-    const lanBypassState = await new Promise(r => {
-      lanBypassSock.emit("lobby:setName", { name: "LanBypassUser" });
-      lanBypassSock.once("lobby:state", r);
-    });
-    if (!lanBypassState.players || lanBypassState.players.length < 1) {
-      throw new Error("S4 FAIL: lan realm should bypass code requirement");
-    }
-    t("LAN realm correctly bypassed code requirement");
-    lanBypassSock.emit("lobby:reset");
-    await sleep(300);
-    lanBypassSock.disconnect();
-
-    console.log("  PASS: Session code gate enforced for public realm, bypassed for lan\n");
+  // LAN host joins → creates the session and receives the generated code.
+  const s4host = io(BASE, LAN_HEADERS);
+  await new Promise(r => s4host.on("connect", r));
+  const s4hostState = await new Promise(r => {
+    s4host.emit("lobby:setName", { name: "Host4" });
+    s4host.once("lobby:state", r);
+  });
+  const code = s4hostState.sessionCode;
+  if (!code || !/^[A-Z2-9]{6}$/.test(code)) {
+    throw new Error("S4 FAIL: host should receive a 6-char sessionCode, got " + code);
   }
+  t("LAN host created session, received code: " + code);
+
+  // 4b: public wrong code → rejected
+  const wrongCodeSock = io(BASE);
+  await new Promise(r => wrongCodeSock.on("connect", r));
+  const wrongCodeErr = await new Promise(r => {
+    wrongCodeSock.once("error", r);
+    wrongCodeSock.emit("lobby:setName", { name: "WrongCodeUser", code: "WRONG7" });
+    setTimeout(() => r(null), 1500);
+  });
+  if (!wrongCodeErr) throw new Error("S4 FAIL: wrong code should be rejected");
+  t("Wrong code correctly rejected: " + wrongCodeErr.message);
+  wrongCodeSock.disconnect();
+
+  // 4c: public correct code → accepted; sessionCode must NOT leak to non-host
+  const rightCodeSock = io(BASE);
+  await new Promise(r => rightCodeSock.on("connect", r));
+  const rightCodeState = await new Promise(r => {
+    rightCodeSock.emit("lobby:setName", { name: "RightCodeUser", code });
+    rightCodeSock.once("lobby:state", r);
+  });
+  if (!rightCodeState.players || rightCodeState.players.length < 2) {
+    throw new Error("S4 FAIL: correct code should be accepted");
+  }
+  if (rightCodeState.sessionCode) {
+    throw new Error("S4 FAIL: sessionCode must not be sent to non-host players");
+  }
+  t("Correct code accepted; sessionCode correctly withheld from non-host");
+  rightCodeSock.disconnect();
+
+  // 4d: LAN realm bypasses the code entirely (no code provided)
+  const lanBypassSock = io(BASE, LAN_HEADERS);
+  await new Promise(r => lanBypassSock.on("connect", r));
+  const lanBypassState = await new Promise(r => {
+    lanBypassSock.emit("lobby:setName", { name: "LanBypassUser" });
+    lanBypassSock.once("lobby:state", r);
+  });
+  if (!lanBypassState.players || lanBypassState.players.length < 1) {
+    throw new Error("S4 FAIL: lan realm should bypass code requirement");
+  }
+  t("LAN realm correctly bypassed code requirement");
+
+  // Cleanup
+  s4host.emit("lobby:reset");
+  await sleep(300);
+  s4host.disconnect();
+  lanBypassSock.disconnect();
+
+  console.log("  PASS: Session code gate enforced for public realm, bypassed for lan\n");
 
   console.log("\n=== ALL SECURITY TESTS PASSED ===");
   process.exit(0);

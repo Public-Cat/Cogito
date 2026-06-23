@@ -22,10 +22,6 @@ services:
       # `cogito-net` (see deploy/DEPLOY.md section 3) — don't attach
       # anything else to it.
       - HOST=0.0.0.0
-      # SECURITY: set a real secret here (or via a .env file) before going
-      # live — this placeholder is public knowledge. Rotate by changing the
-      # value and running `docker compose up -d`.
-      - SESSION_CODE=changeme
       # SECURITY: set ALLOWED_ORIGINS in a .env file next to this compose file
       # (copy .env.example) — must match the vhost blocks you add to your own
       # Caddyfile (see deploy/DEPLOY.md). Comma-separated, no spaces.

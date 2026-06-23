@@ -11,11 +11,6 @@ const MAX_MESSAGE_LENGTH = 500;
 const MAX_AI_PLAYERS = 8;
 const MAX_TOPIC_LENGTH = 120;
 
-// Public-realm joins require this code when set (e.g. SESSION_CODE=abc123).
-// LAN-realm joins always bypass it. Null means no code is required at all,
-// so existing tests/dev flows that omit a code keep working.
-const SESSION_CODE = process.env.SESSION_CODE || null;
-
 function sanitize(str) {
   return str.replace(/[<>&"']/g, '');
 }
@@ -75,9 +70,12 @@ export function registerHandlers(io, socket) {
         return;
       }
 
-      // Public-realm join gate: require the session code when one is configured.
-      // LAN realm (trusted reverse proxy) always bypasses this check.
-      if (socket.data.realm === 'public' && SESSION_CODE && code !== SESSION_CODE) {
+      // Public-realm join gate: must present the current session's code.
+      // LAN realm (trusted reverse proxy) bypasses this and is what creates
+      // the session — so a public player can never spin up a session, and
+      // there's nothing to join until the LAN host has joined.
+      const existing = gameManager.getSession();
+      if (socket.data.realm === 'public' && (!existing || code !== existing.sessionCode)) {
         socket.emit('error', { message: 'Invalid session code.' });
         return;
       }
@@ -116,6 +114,8 @@ export function registerHandlers(io, socket) {
         myToken: player.rejoinToken,
         models,
         isHost: session.getHost()?.socketId === socket.id,
+        // Host-only: the code public friends need to join. Never sent to others.
+        sessionCode: session.getHost()?.socketId === socket.id ? session.sessionCode : undefined,
       };
       socket.emit('lobby:state', state);
 
@@ -126,6 +126,7 @@ export function registerHandlers(io, socket) {
           myId: host.id,
           myToken: host.rejoinToken,
           isHost: true,
+          sessionCode: session.sessionCode,
         };
         io.to(host.socketId).emit('lobby:state', hostState);
         io.to(host.socketId).emit('host:assigned');
@@ -351,6 +352,8 @@ export function registerHandlers(io, socket) {
               io.to(p.socketId).emit('lobby:state', {
                 ...lobbyState, models, myId: p.id, myToken: p.rejoinToken || null,
                 isHost: currentSession.getHost()?.socketId === p.socketId,
+                sessionCode: currentSession.getHost()?.socketId === p.socketId
+                  ? currentSession.sessionCode : undefined,
               });
             }
           }

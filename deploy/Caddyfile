@@ -6,8 +6,9 @@
 # integration steps (sharing a Docker network with this container, etc).
 #
 # Public vhost: fronted by Cloudflare Tunnel, reachable by anyone with the
-# link + SESSION_CODE. LAN vhost: never tunneled, reachable only from the
-# local network (or the host itself), grants host privileges.
+# link + the per-session join code (auto-generated, shown to the host). LAN
+# vhost: never tunneled, reachable only from the local network (or the host
+# itself), grants host privileges.
 #
 # Replace cogito.example.com with your real public domain before deploying.
 # `cogito:3000` below resolves once your Caddy container is attached to the

@@ -73,16 +73,16 @@ Minimum **2 humans + 1 AI** to start. Voting starts round ≥ 2, then every roun
 ## Socket events
 **Client→Server**: `lobby:setName` (`{ name, code }`), `lobby:start` (callback), `game:sendMessage`, `game:castVote`, `game:returnToLobby`, `lobby:reset`, `game:rejoin` (`{ playerId, token }`)
 
-**Server→Client**: `lobby:state` (+ per-recipient `myToken`), `host:assigned`, `game:state` (+ per-player `myId`, `myToken`, `submittedBy[]`, `activePlayerCount`), `game:newMessage` (batched at REVEALING start), `game:votingSoon`, `game:voteStart`, `game:voteProgress` (`votedCount`/`totalEligible`, after each human vote), `game:voteResult`, `game:ended`, `error`
+**Server→Client**: `lobby:state` (+ per-recipient `myToken`; + host-only `sessionCode`), `host:assigned`, `game:state` (+ per-player `myId`, `myToken`, `submittedBy[]`, `activePlayerCount`), `game:newMessage` (batched at REVEALING start), `game:votingSoon`, `game:voteStart`, `game:voteProgress` (`votedCount`/`totalEligible`, after each human vote), `game:voteResult`, `game:ended`, `error`
 
-Full `game:state` emitted after every state transition. `game:ended.players` includes `model` for each AI. `myToken` (the per-player `rejoinToken`) is sent ONLY to its owning socket — never broadcast or attached to other players' entries.
+Full `game:state` emitted after every state transition. `game:ended.players` includes `model` for each AI. `myToken` (the per-player `rejoinToken`) is sent ONLY to its owning socket — never broadcast or attached to other players' entries. Likewise `sessionCode` on `lobby:state` is sent ONLY to the host's socket.
 
 **Reset distinction**: `lobby:reset` calls `gameManager.reset()` + broadcasts empty `lobby:state` to ALL connected sockets. `game:returnToLobby` does not broadcast — emits `lobby:state` with `isHost: true` only to the caller. **Both now require a LAN-realm host** (`requireLanHost()`); a public-realm or non-host socket is rejected with `error`.
 
 ## Security / access control
 Built for public hosting via **Cloudflare Tunnel → Caddy → app**. See `deploy/DEPLOY.md`, `deploy/Caddyfile`, `deploy/cloudflared-config.yml`.
 - **Realm**: `server/index.js` sets `socket.data.realm` from the `X-Cogito-Realm` header (`'lan'` only if exactly `lan`, else `'public'` — fail safe). Caddy strip-then-sets this header per vhost; this repo doesn't run Caddy itself — `cogito` publishes no host port and is only reachable from the `cogito-net` Docker network (the operator connects their own Caddy container to it, see `deploy/DEPLOY.md`), which is what makes the header trustworthy. Only `lan` humans can become host (`assignHost()` filters by realm).
-- **Join gate**: `SESSION_CODE` env — when set, public-realm `lobby:setName` must send a matching `code`; LAN bypasses; unset = no code (tests/dev keep working).
+- **Join gate**: per-session join code, auto-generated in the `GameSession` constructor (6 chars, `A-Z`+`2-9` minus ambiguous `O/0/I/1/L`). Public-realm `lobby:setName` must send a matching `code` against the *existing* session — so a public player can't create a session, and there's nothing to join until a LAN host has joined (LAN bypasses the check and is what creates the session). The code is sent only to the host (host-only `sessionCode` on `lobby:state`) and regenerated on every reset / return-to-lobby. No env var.
 - **Identity**: `generatePlayerId()` = random UUID; per-player `rejoinToken`; `game:rejoin` verifies `{ playerId, token }`.
 - **Limits**: CORS `ALLOWED_ORIGINS`; `lobby:start` validates models vs cached Ollama list (skipped if cache empty), caps AI at `MAX_AI_PLAYERS=8`, sanitizes/caps `topic` (≤120); `promisePool` caps Ollama concurrency at 4; per-socket rate limits on `lobby:setName`, `game:sendMessage`, `game:castVote`, `game:rejoin`.
 - **Tests**: host client must connect with `extraHeaders: { 'X-Cogito-Realm': 'lan' }`; `tests/security.mjs` covers the access-control surface.
@@ -93,7 +93,7 @@ Built for public hosting via **Cloudflare Tunnel → Caddy → app**. See `deplo
 
 ## Docker
 - `node:20-alpine`, `npm ci --omit=dev`, runs as non-root (`USER node`). Service `cogito` publishes no host port; reachable only via the `cogito-net` Docker network, which the operator connects their own pre-existing Caddy container to (see `deploy/DEPLOY.md`) — `read_only: true` + `tmpfs: /tmp`, `cap_drop: ALL`, `no-new-privileges:true`, `restart: unless-stopped`.
-- Env: `HOST=0.0.0.0` (listen on the container interface; isolation comes from having no published port and being on `cogito-net`, not from HOST), plus `SESSION_CODE`, `ALLOWED_ORIGINS`, `OLLAMA_BASE_URL`. Set real values before deploying (see `deploy/DEPLOY.md`).
+- Env: `HOST=0.0.0.0` (listen on the container interface; isolation comes from having no published port and being on `cogito-net`, not from HOST), plus `ALLOWED_ORIGINS`, `OLLAMA_BASE_URL`. Set real values before deploying (see `deploy/DEPLOY.md`). (The join code is auto-generated per session — no env var.)
 - `.dockerignore` excludes `*.md` but preserves `!RULES.md` — `RULES.md` is included in the image to serve via `GET /api/rules`.
 
 ## Historical bugs (don't reintroduce)

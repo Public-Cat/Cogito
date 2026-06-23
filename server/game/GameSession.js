@@ -1,9 +1,21 @@
+import { randomInt } from 'node:crypto';
 import { Player } from './Player.js';
 import { topics as topicList } from './topics.js';
 import { chat } from '../ollama/OllamaClient.js';
 import { buildSystemPrompt, buildTurnPrompt, buildRankingPrompt, buildNamePrompt } from '../ollama/prompts.js';
 
 const PERSONALITIES = ['skeptical', 'enthusiastic', 'thoughtful', 'dry', 'curious', 'anxious'];
+
+// Charset for shareable session codes: uppercase A-Z + digits 2-9, minus the
+// visually ambiguous O/0/I/1/L so codes are easy to read aloud and type.
+const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+/** Generate a random 6-character session code from CODE_CHARS. */
+function generateSessionCode() {
+  let code = '';
+  for (let i = 0; i < 6; i++) code += CODE_CHARS[randomInt(CODE_CHARS.length)];
+  return code;
+}
 
 // Duration of the VOTING phase before rankings/votes are force-resolved.
 const VOTE_TIMEOUT_MS = 20000;
@@ -48,6 +60,10 @@ const STATES = {
 export class GameSession {
   constructor() {
     this.state = STATES.LOBBY;
+    // Per-session join code, shown only to the host so they can share it with
+    // public-realm friends. Regenerated whenever a new session is created
+    // (i.e. on reset / return-to-lobby, which null and recreate the session).
+    this.sessionCode = generateSessionCode();
     this.players = [];
     this.messages = [];
     this.topic = '';

@@ -3,8 +3,8 @@
 # Publishes ONLY the public hostname (cogito.example.com) to Caddy.
 # cogito.home.arpa is DELIBERATELY ABSENT from this ingress list — it is
 # LAN-only and must NEVER be tunneled to the internet. The only gate on the
-# public hostname is the in-app SESSION_CODE (see deploy/DEPLOY.md); do not
-# rely on hostname secrecy alone.
+# public hostname is the in-app per-session join code (auto-generated, shown
+# to the host — see deploy/DEPLOY.md); do not rely on hostname secrecy alone.
 #
 # Replace <TUNNEL_ID> with your tunnel's UUID (from `cloudflared tunnel create`)
 # and cogito.example.com with your real domain. Place this file at
