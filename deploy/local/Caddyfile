@@ -1,0 +1,23 @@
+# Local-only, standalone Caddy for testing the LAN realm path end-to-end.
+# Unlike deploy/Caddyfile (a snippet for your existing Caddy), this file is a
+# complete config Caddy runs by itself. It serves ONLY the LAN vhost and
+# stamps X-Cogito-Realm: lan so the app grants host privileges. The public
+# vhost is intentionally omitted (not needed for the join test).
+
+{
+	# .home.arpa can't get a public ACME cert; use Caddy's internal CA. Don't
+	# auto-redirect :80 -> :443 so a plain curl smoke test still works.
+	auto_https disable_redirects
+}
+
+cogito.home.arpa {
+	tls internal
+	reverse_proxy cogito:3000 {
+		# SECURITY: `header_up` with a value uses Set, which REPLACES any
+		# X-Cogito-Realm a client tried to send — so this alone is safe. Do NOT
+		# add `header_up -X-Cogito-Realm`: Caddy applies deletes AFTER sets, so a
+		# delete on the same field strips the value we just set and the app
+		# falls back to realm=public (no host privileges).
+		header_up X-Cogito-Realm lan
+	}
+}

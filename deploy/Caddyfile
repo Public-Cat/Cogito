@@ -18,11 +18,12 @@
 # Public — published through Cloudflare Tunnel. Friends reach this.
 cogito.example.com {
     reverse_proxy cogito:3000 {
-        # SECURITY: strip-then-set. A client could send its own
-        # X-Cogito-Realm header trying to claim "lan" privileges — delete
-        # whatever they sent first, then force the correct value. Order
-        # matters: header_up directives apply in sequence.
-        header_up -X-Cogito-Realm          # SECURITY: strip anything the client sent
+        # SECURITY: `header_up` with a value uses Set, which REPLACES any
+        # X-Cogito-Realm a client tried to send — so this single line already
+        # forces the realm and a forged header can't get through.
+        # Do NOT add `header_up -X-Cogito-Realm` to "strip first": Caddy applies
+        # header deletes AFTER sets, so the delete would remove the value we
+        # just set and the upstream would receive no header at all.
         header_up X-Cogito-Realm public    # force public realm
     }
 }
@@ -31,7 +32,10 @@ cogito.example.com {
 cogito.home.arpa {
     tls internal
     reverse_proxy cogito:3000 {
-        header_up -X-Cogito-Realm
+        # Set replaces any client-sent value (see the public block). A
+        # `header_up -X-Cogito-Realm` here would be applied AFTER this set and
+        # strip the header, leaving LAN clients as realm=public with no host
+        # privileges — which is exactly the bug this avoids.
         header_up X-Cogito-Realm lan       # grants host privileges
     }
 }

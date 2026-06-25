@@ -51,6 +51,10 @@ io.on('connection', (socket) => {
   // header, so default to 'public' (fail safe) when it's absent or wrong.
   socket.data.realm = socket.handshake.headers['x-cogito-realm'] === 'lan' ? 'lan' : 'public';
   console.log(`Socket connected: ${socket.id} (realm: ${socket.data.realm})`);
+  // Tell the client its realm so the join UI can hide the session-code field
+  // for LAN players (they bypass the code gate). Not sensitive — the server
+  // still enforces realm; this only drives presentation.
+  socket.emit('client:hello', { realm: socket.data.realm });
   registerHandlers(io, socket);
 });
 
