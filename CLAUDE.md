@@ -15,6 +15,7 @@ node tests/e2e.mjs           # Lobby + one submit/reveal cycle
 node tests/full-game.mjs     # Full game through voting + end
 node tests/rejoin.mjs        # Player reconnection mid-game
 node tests/disconnect.mjs    # Disconnect edge cases
+node tests/win-condition.mjs # Unit test: win-condition logic, no server/Ollama needed
 node tests/ui-interactive.mjs  # Playwright: 2 humans + 1 AI (needs chromium)
 node tests/ui-6p4ai.mjs        # Playwright: 6 humans + 4 AIs
 
@@ -66,7 +67,7 @@ Minimum **2 humans + 1 AI** to start. Voting begins at round ≥ 2.
 ### AI Behavior
 
 - **Message generation**: All AIs run `generateAIMessage()` in parallel during SUBMITTING. Each AI gets `[...messageHistory, turnPrompt]` sent to Ollama; the turn prompt is not appended to history until after a successful reply. After all messages are revealed, each AI's history gets a single `user` transcript entry with other players' messages from that round.
-- **Voting (combined AI + human Borda count)**: `collectAIRankings()` runs all AI rankings in parallel (`Promise.allSettled`, 20s timeout); each AI ranks all active players from most suspicious to least (position 0 = N-1 points, ..., last = 0). In parallel, each active, connected human casts one vote via `game:castVote` → `castHumanVote()`, counted as a full first-place pick (N-1 points), same weight as an AI's top choice. Self-votes and votes from eliminated/disconnected players are rejected. All points sum into one score; highest eliminated. No early-resolve — votes collected for the full 20s window, then `resolveRankings()`. Tiebreaker 1: ranked/voted highest (earliest) in more individual AI rankings or human votes. Tiebreaker 2: cumulative Borda history across all prior rounds. If still tied, no elimination.
+- **Voting (combined AI + human Borda count)**: `collectAIRankings()` runs all AI rankings in parallel (`Promise.allSettled`, 20s timeout); each AI ranks all active players from most suspicious to least (position 0 = N-1 points, ..., last = 0). In parallel, each active, connected human casts one vote via `game:castVote` → `castHumanVote()`, counted as a full first-place pick (N-1 points), same weight as an AI's top choice. Self-votes and votes from eliminated/disconnected players are rejected. All points sum into one score; highest eliminated. No early-resolve — votes collected for the full 20s window, then `resolveRankings()`. Tiebreaker 1: ranked/voted highest (earliest) in more individual AI rankings or human votes. Tiebreaker 2: cumulative Borda history across all prior rounds. Tiebreaker 3 (final, guarantees progress): random pick among the still-tied leaders — without it, a symmetric standoff (each side targets the other every round, notably the final 1-human-vs-1-AI endgame) ties identically forever and the game never ends.
 - **Prompts**: `buildSystemPrompt`, `buildTurnPrompt`, `buildRankingPrompt`, `buildNamePrompt` — all in `prompts.js`.
 
 ### Frontend (`client/`)
@@ -117,3 +118,5 @@ Operator runbook + Cloudflare config live in `deploy/` (`DEPLOY.md`, `Caddyfile`
 | Shared localStorage `myId` → multi-tab collision | Key is `cogito_myId`, emitted per-player via `game:state.myId` |
 | Borda single-player ranking gave 0 points | Edge case: ranking only 1 player → give 1 point |
 | Borda ties stalled games with even AI splits | Add cumulative Borda history as 3rd-level tiebreaker |
+| Final 1-human-vs-1-AI standoff never resolved (each side targeting the other ties identically forever, so solo win never triggered) | Add random pick among still-tied leaders as 4th-level tiebreaker in `resolveBordaTie()` |
+| Sole-survivor win only fired once AIs also hit 0, so a lone human win didn't trigger while AIs were still alive | `checkWinCondition()`/`determineWinner()` now check `aliveHumans.length === 1` before the AI count, per RULES.md's "vote out other humans to become the sole survivor" |

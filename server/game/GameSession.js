@@ -18,7 +18,7 @@ function generateSessionCode() {
 }
 
 // Duration of the VOTING phase before rankings/votes are force-resolved.
-const VOTE_TIMEOUT_MS = 20000;
+const VOTE_TIMEOUT_MS = 40000;
 const SUBMIT_PHASE_MS = 45000;
 
 // Max simultaneous in-flight requests to Ollama. Bounds load when many AIs
@@ -83,6 +83,10 @@ export class GameSession {
     this.bordaHistory = new Map();
     this.lastElimination = null;
     this.lastRoundMessages = [];
+    // Set once by endGame() so a player who refreshes after the game ends
+    // (re-entering via game:rejoin, which only replays game:state) still
+    // gets the winner/reveal payload instead of being stuck in the chat view.
+    this.endResult = null;
   }
 
   addPlayer(id, isHuman, socketId) {
@@ -180,6 +184,7 @@ export class GameSession {
       topic: this.topic,
       submittedBy: [...this.submittedPlayerIds],
       activePlayerCount: this.getActivePlayers().length,
+      endResult: this.state === STATES.ENDED ? this.endResult : null,
     };
   }
 
@@ -438,9 +443,11 @@ export class GameSession {
 
     // Each task already catches its own errors, so the pool (built on
     // Promise.all over workers) is equivalent to the prior Promise.allSettled.
+    // Intentionally does not call tryResolveRankings(): per design, voting
+    // always runs the full VOTE_TIMEOUT_MS window so humans aren't cut off
+    // just because AI rankings finished quickly. Only the voteTimeout fires resolution.
     await promisePool(rankingTasks, MAX_CONCURRENT_OLLAMA_CALLS);
     this.aiRankingsResolved = true;
-    this.tryResolveRankings();
   }
 
   parseRankingResponse(response, activePlayers, excludeId) {
@@ -613,9 +620,14 @@ export class GameSession {
       return winner;
     }
 
+    // Level 4 tiebreaker: random pick among the still-tied leaders. Without this,
+    // a symmetric standoff (each side ranks/votes the other every round, most
+    // notably the final 1-human-vs-1-AI endgame) ties identically forever at
+    // every prior level and the game never reaches a winner.
     const tiedNames = tiedPlayerIds.map(id => this.getPlayer(id)?.name).join(', ');
-    console.log(`[GAME] No elimination (Borda tie unresolved after cumulative history: ${tiedNames})`);
-    return null;
+    const winner = this.getPlayer(leaders[randomInt(leaders.length)][0]);
+    console.log(`[GAME] Borda tie unresolved after cumulative history — random tiebreak: ${winner.name} eliminated among [${tiedNames}]`);
+    return winner;
   }
 
   checkWinCondition() {
@@ -624,12 +636,13 @@ export class GameSession {
 
     if (aliveHumans.length === 0) {
       this.endGame('ais');
+    } else if (aliveHumans.length === 1) {
+      // Sole survivor: becoming the last human standing is its own win condition,
+      // independent of how many AIs remain (RULES.md: "vote out other humans to
+      // become the sole survivor" is a distinct path from "vote out every AI").
+      this.endGame('solo', aliveHumans[0]);
     } else if (aliveAIs.length === 0) {
-      if (aliveHumans.length === 1) {
-        this.endGame('solo', aliveHumans[0]);
-      } else {
-        this.endGame('humans');
-      }
+      this.endGame('humans');
     } else {
       console.log(`[GAME] No winner yet — continuing (Humans: ${aliveHumans.length}, AIs: ${aliveAIs.length})`);
       this.startSubmitPhase();
@@ -672,16 +685,17 @@ export class GameSession {
       payload.winnerPlayerId = winnerPlayer.id;
       payload.winnerPlayerName = winnerPlayer.name;
     }
+    this.endResult = payload;
     this.emitToAll('game:ended', payload);
   }
 
   determineWinner() {
     const aliveHumans = this.players.filter(p => p.isHuman && !p.isEliminated && !p.isDisconnected);
     const aliveAIs = this.players.filter(p => !p.isHuman && !p.isEliminated);
-    if (aliveAIs.length === 0) {
-      if (aliveHumans.length === 1) return { type: 'solo', player: aliveHumans[0] };
-      return { type: 'humans' };
-    }
+    if (aliveHumans.length === 0) return { type: 'ais' };
+    // Sole survivor wins outright, independent of remaining AI count — see checkWinCondition().
+    if (aliveHumans.length === 1) return { type: 'solo', player: aliveHumans[0] };
+    if (aliveAIs.length === 0) return { type: 'humans' };
     return { type: 'ais' };
   }
 

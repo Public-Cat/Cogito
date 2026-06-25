@@ -410,6 +410,13 @@ socket.on('game:state', (state) => {
   } else {
     stopCountdowns();
   }
+
+  // Rejoining after the game already ended (e.g. a page refresh) only
+  // replays game:state, never the one-shot game:ended event, so the end
+  // screen must be reconstructed from the persisted endResult here too.
+  if (state.phase === 'ENDED' && state.endResult) {
+    showEndScreen(state.endResult);
+  }
 });
 
 socket.on('game:newMessage', (msg) => {

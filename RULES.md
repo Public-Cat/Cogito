@@ -78,9 +78,9 @@ The game ends **immediately** after a voting phase resolves:
 
 | Condition | Result |
 |---|---|---|
-| All **AI players** have been eliminated | 🏆 **Humans Win** |
+| Only **one human player** remains | 🏆 **Sole Survivor** — that human wins instantly, even if AI players are still alive |
+| All **AI players** have been eliminated (2+ humans remain) | 🏆 **Humans Win** |
 | All **Human players** have been eliminated | 💀 **AIs Win** |
-| Only one player remains (any type) | Game ends immediately — last player's side wins |
 
 - If neither condition is met after a vote, the game continues into the next discussion round.
 - There is **no round limit** — the game ends only when one side is fully eliminated.
@@ -140,7 +140,8 @@ Once the game starts, **the host is just another player**. No special powers in-
 | Scenario | Behavior |
 |---|---|
 | A human disconnects mid-game | They are marked as disconnected and excluded from active players. In SUBMITTING phase, remaining players may trigger early resolve when all have submitted. |
-| Only one player remains (any type) | Game ends immediately. AIs win if the last player is AI; Humans win if the last player is Human. |
+| Only one human player remains | Game ends immediately as a Sole Survivor win for that human — even if AI players are still alive. |
+| Only one AI player remains, no humans left | AIs win (all humans already eliminated). |
 | Host disconnects in lobby | The next human in the lobby is promoted to Host. |
 | Host disconnects during the game | They are treated as a disconnected player. No host promotion occurs during gameplay. |
 | No AI models available in Ollama | The lobby shows an error. The host cannot configure AI players until Ollama is reachable. |

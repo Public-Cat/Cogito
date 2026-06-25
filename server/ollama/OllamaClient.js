@@ -1,7 +1,7 @@
 import fetch from 'node-fetch';
 
 const BASE_URL = process.env.OLLAMA_BASE_URL || 'http://192.168.1.30:11434';
-const CHAT_TIMEOUT_MS = 30000;
+const CHAT_TIMEOUT_MS = 60000;
 const LIST_TIMEOUT_MS = 5000;
 
 let cachedModels = [];
