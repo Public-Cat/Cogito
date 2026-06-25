@@ -240,7 +240,7 @@ function addMessage(msg, animate = true) {
   div.style.marginBottom = '4px';
   div.style.wordBreak = 'break-word';
 
-  if (animate && msg.playerId !== myId) {
+  if (animate) {
     const prefix = document.createElement('span');
     prefix.style.color = 'var(--color-text-dim)';
     prefix.textContent = `[${msg.playerName}] > `;
