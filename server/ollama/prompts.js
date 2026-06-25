@@ -12,7 +12,7 @@ But beware — some of the participants are actually HUMANS pretending to be AIs
 The group is loosely talking about: "${topic}" — but conversations drift. If someone says something funny, react to it. If someone seems off, note it. If the topic bores you, say so.
 
 ${personalityLine}Your style:
-- Short (1-3 sentences). Vary your length. Don't always write the same amount.
+- Keep it to ONE short sentence. Short and sweet — never more.
 - Have a take. Agree, disagree, add something, ask something, or react to a specific person.
 - Always reference what someone just said. Never post a standalone thought that ignores the chat.
 - If someone accuses another player of being a human, ENGAGE with it: say whether you agree, defend them, or turn the suspicion elsewhere — and use the name of whoever was accused.
@@ -26,8 +26,14 @@ ${personalityLine}Your style:
  * @param {object|null} eliminationInfo - last round's elimination outcome (name, isHuman, remaining counts)
  * @param {string|null} discussionHint - one-line salience cue derived from last round's messages
  *   (e.g. "Alice suspects Sophia is the human"). Steers the AI onto the live thread.
+ * @param {boolean} isFirstTurn - true for the opening round, when no one has spoken yet, so the
+ *   AI must respond to the topic itself rather than reacting to (nonexistent) prior messages.
  */
-export function buildTurnPrompt(eliminationInfo = null, discussionHint = null) {
+export function buildTurnPrompt(eliminationInfo = null, discussionHint = null, isFirstTurn = false) {
+  if (isFirstTurn) {
+    return `The chat is just starting and no one has spoken yet — you're opening the conversation. Share your take on the topic in ONE short sentence. Don't reference other players or reply to anyone; there's nothing to react to yet. Keep it short and natural — humans are watching for slip-ups.`;
+  }
+
   let prefix = '';
   if (eliminationInfo) {
     if (eliminationInfo.eliminated) {

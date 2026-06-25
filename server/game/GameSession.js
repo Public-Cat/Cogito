@@ -297,7 +297,7 @@ export class GameSession {
   }
 
   async generateAIMessage(ai) {
-    const turnPrompt = buildTurnPrompt(this.lastElimination, this.buildDiscussionHint(ai));
+    const turnPrompt = buildTurnPrompt(this.lastElimination, this.buildDiscussionHint(ai), this.round === 0);
     const messages = [...ai.messageHistory, { role: 'user', content: turnPrompt }];
     const reply = await chat(ai.model, messages);
     if (this.state !== STATES.SUBMITTING) return;
