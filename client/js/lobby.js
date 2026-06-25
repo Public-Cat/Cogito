@@ -2,6 +2,10 @@ const socket = io();
 
 let scrambleIntervals = [];
 let rulesCache = null;
+// Whether the join screen should ask for a session code. LAN players (told via
+// the `client:hello` event) bypass the code gate, so the field is hidden for
+// them. Defaults to true (public realm / before the event arrives) — fail safe.
+let codeRequired = true;
 
 const app = document.getElementById('app');
 const SCRAMBLE_CHARS = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲンABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -38,8 +42,10 @@ function render() {
       <div id="joinPanel">
         <label for="nameInput">enter designation:</label><br>
         <input type="text" id="nameInput" maxlength="20" placeholder="your name" style="width:100%;margin:8px 0;">
-        <label for="codeInput">session code:</label><br>
-        <input type="text" id="codeInput" maxlength="6" placeholder="code from your host (friends only)" style="width:100%;margin:8px 0;text-transform:uppercase;">
+        <div id="codeField">
+          <label for="codeInput">session code:</label><br>
+          <input type="text" id="codeInput" maxlength="6" placeholder="code from your host (friends only)" style="width:100%;margin:8px 0;text-transform:uppercase;">
+        </div>
         <button id="joinBtn" style="width:100%;">> JOIN</button>
       </div>
       <div id="lobbyContent" style="display:none;">
@@ -77,6 +83,7 @@ function render() {
   // Prefill the code from an invite URL (?code=ABC123) if present.
   const urlCode = new URLSearchParams(window.location.search).get('code');
   if (urlCode) document.getElementById('codeInput').value = urlCode.toUpperCase();
+  applyRealmToJoinPanel();
   document.getElementById('resetBtn').addEventListener('click', () => {
     if (confirm('Reset all sessions and kick all players?')) {
       socket.emit('lobby:reset');
@@ -103,6 +110,14 @@ function render() {
     rulesContent.style.display = 'block';
     rulesToggle.textContent = '> HIDE RULES';
   });
+}
+
+// Show or hide the session-code field based on the client's realm. Safe to call
+// before render() (no-op if the field isn't in the DOM yet) and again after the
+// client:hello event arrives, so it works regardless of event/render ordering.
+function applyRealmToJoinPanel() {
+  const codeField = document.getElementById('codeField');
+  if (codeField) codeField.style.display = codeRequired ? 'block' : 'none';
 }
 
 function joinLobby() {
@@ -335,6 +350,12 @@ function renderPlayerList(players) {
     startScramble(nameSpan, p.name.length);
   });
 }
+
+socket.on('client:hello', ({ realm } = {}) => {
+  // LAN players bypass the join code, so don't prompt them for one.
+  codeRequired = realm !== 'lan';
+  applyRealmToJoinPanel();
+});
 
 socket.on('lobby:state', (state) => {
   // Token keyed by id so multiple tabs in one browser don't overwrite each

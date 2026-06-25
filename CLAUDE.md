@@ -18,6 +18,11 @@ node tests/disconnect.mjs    # Disconnect edge cases
 node tests/ui-interactive.mjs  # Playwright: 2 humans + 1 AI (needs chromium)
 node tests/ui-6p4ai.mjs        # Playwright: 6 humans + 4 AIs
 
+# Realm/host security through a real Caddy reverse proxy (no Ollama needed):
+# bring up the local Caddy harness first (see deploy/local/README.md), then
+node tests/join.mjs            # 2 LAN players join w/o code; first becomes host
+node tests/ui-realm-code.mjs   # Playwright: session-code box is hidden for LAN realm
+
 # Model-comparison eval: scripts a human accusation, scores AI dynamism + rule-following
 # Configurable via env: MODELS, AI_COUNT, TOPIC, EVAL_BASE, OLLAMA_URL, OUT_DIR (writes to ./tmp)
 node tests/ai-eval.mjs
@@ -79,7 +84,7 @@ CSS lives entirely in `client/css/matrix.css`. No external CSS frameworks.
 
 **Client → Server**: `lobby:setName` (`{ name, code }`), `lobby:start` (callback), `game:sendMessage`, `game:castVote` (`{ targetId }`), `game:returnToLobby`, `lobby:reset`, `game:rejoin` (`{ playerId, token }`)
 
-**Server → Client**: `lobby:state` (+ per-recipient `myToken`), `host:assigned`, `game:state` (+ per-player `myId`, `myToken`, `submittedBy[]`, `activePlayerCount`), `game:newMessage`, `game:votingSoon`, `game:voteStart`, `game:voteProgress` (`{ votedCount, totalEligible }`, after each human vote), `game:voteResult`, `game:ended`, `error`
+**Server → Client**: `client:hello` (`{ realm }`, emitted once on connect so the join UI can hide the session-code field for LAN players), `lobby:state` (+ per-recipient `myToken`), `host:assigned`, `game:state` (+ per-player `myId`, `myToken`, `submittedBy[]`, `activePlayerCount`), `game:newMessage`, `game:votingSoon`, `game:voteStart`, `game:voteProgress` (`{ votedCount, totalEligible }`, after each human vote), `game:voteResult`, `game:ended`, `error`
 
 `game:state` is emitted after every state transition. Both `lobby:reset` and `game:returnToLobby` broadcast an empty `lobby:state` to **all** sockets so no one is stranded on a defunct end screen; `game:returnToLobby` then sends the caller a second `lobby:state` with `isHost:true`. **Both require a LAN-realm host** (see Security). `myToken` is sent only to its owning socket — never broadcast; the host-only `sessionCode` field on `lobby:state` is likewise sent only to the host's socket.
 
@@ -87,7 +92,7 @@ CSS lives entirely in `client/css/matrix.css`. No external CSS frameworks.
 
 Designed for public hosting via **Cloudflare Tunnel → Caddy (HTTPS) → app** (no open firewall ports). Three layers:
 
-- **Realm gating (host privileges).** Caddy serves two vhosts and stamps a trusted `X-Cogito-Realm` header (strip-then-set, so clients can't forge it): a public vhost (`origin` header `public`) for friends, and a LAN-only vhost (`lan`, e.g. `cogito.home.arpa`) for the host. `server/index.js` reads the header into `socket.data.realm` (defaults to `public` — fail safe). Only `lan` players can become host or call `lobby:reset` / `game:returnToLobby` (`requireLanHost()` in `handlers.js`). This repo does not run Caddy — `cogito` publishes no host port at all, and is only reachable from whatever is attached to the `cogito-net` Docker network (the operator connects their own Caddy container to it, see `deploy/DEPLOY.md`), which is what makes the header trustworthy.
+- **Realm gating (host privileges).** Caddy serves two vhosts and stamps a trusted `X-Cogito-Realm` header per vhost (`header_up X-Cogito-Realm <realm>` — Caddy's Set replaces any value a client tried to forge, so a single set line is sufficient; do **not** also add a `header_up -X-Cogito-Realm` strip, as Caddy applies deletes after sets and would strip the realm, leaving everyone `public`): a public vhost (`origin` header `public`) for friends, and a LAN-only vhost (`lan`, e.g. `cogito.home.arpa`) for the host. `server/index.js` reads the header into `socket.data.realm` (defaults to `public` — fail safe). Only `lan` players can become host or call `lobby:reset` / `game:returnToLobby` (`requireLanHost()` in `handlers.js`). This repo does not run Caddy — `cogito` publishes no host port at all, and is only reachable from whatever is attached to the `cogito-net` Docker network (the operator connects their own Caddy container to it, see `deploy/DEPLOY.md`), which is what makes the header trustworthy.
 - **Public join gate (who can play).** A random 6-character join code (`A-Z`+`2-9`, ambiguous chars removed) is generated per session in the `GameSession` constructor and shown only to the host (host-only `sessionCode` on `lobby:state`). Public-realm joins must send a matching `code` in `lobby:setName` against the **existing** session — public players can't create a session, so nothing is joinable until a LAN host has joined (LAN bypasses the check and is what creates the session). A new code is generated on every reset / return-to-lobby. No env var.
 - **Identity / abuse.** Player ids are random UUIDs; each player gets a `rejoinToken` and `game:rejoin` must present `{ playerId, token }`. CORS restricted via `ALLOWED_ORIGINS`. `lobby:start` validates model names against the cached Ollama list, caps AI players at `MAX_AI_PLAYERS` (8), and sanitizes/length-caps `topic`. Per-socket rate limits on `lobby:setName`, `game:sendMessage`, `game:castVote`, `game:rejoin`.
 

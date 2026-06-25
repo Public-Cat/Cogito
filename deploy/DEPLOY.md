@@ -33,9 +33,12 @@ LAN ─────────────────────────�
   which should be just your Caddy container, connected per section 3.
 
 The split-horizon design means the *hostname you use* determines your
-privilege level. Caddy enforces this by stripping any client-supplied
-`X-Cogito-Realm` header and re-setting it itself per vhost (strip-then-set
-— see `deploy/Caddyfile`). The app must trust this header only because
+privilege level. Caddy enforces this by setting the `X-Cogito-Realm` header
+itself per vhost with a single `header_up X-Cogito-Realm <realm>` — Caddy's
+Set *replaces* any value a client tried to forge, so one line is enough. Do
+not also add a `header_up -X-Cogito-Realm` "strip": Caddy applies header
+deletes after sets, so it would wipe the realm and leave every client
+`public` (see `deploy/Caddyfile`). The app must trust this header only because
 Caddy is the sole thing on `cogito-net` that can reach it.
 
 ## 2. App environment
@@ -150,13 +153,13 @@ outbound connections to Cloudflare's edge.
 
 Run these after deploying to confirm each layer behaves as designed:
 
-1. **Realm strip-then-set** (proves a client can't spoof host privileges
-   through the public vhost):
+1. **Realm set wins over a forged header** (proves a client can't spoof host
+   privileges through the public vhost):
    ```bash
    curl -H 'X-Cogito-Realm: lan' https://cogito.example.com/
    ```
    The app must treat this request as `public` — Caddy's `header_up
-   -X-Cogito-Realm` strips the attempted spoof before forcing `public`.
+   X-Cogito-Realm public` (Set) replaces the forged `lan` before proxying.
 
 2. **No host port published** (proves the LAN/internet can't bypass Caddy
    and hit the app directly):

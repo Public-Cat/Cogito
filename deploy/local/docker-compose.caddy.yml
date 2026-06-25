@@ -1,0 +1,30 @@
+# Local test Caddy that fronts the cogito app on the existing cogito-net
+# network and exposes the LAN vhost (cogito.home.arpa) on the host.
+#
+# Usage (from repo root):
+#   docker compose up -d                                   # app + cogito-net
+#   docker compose -f deploy/local/docker-compose.caddy.yml up -d   # caddy
+#
+# cogito-net is created by the root docker-compose.yml, so it's referenced as
+# external here. Caddy reaches the app as `cogito:3000` by container name.
+services:
+  caddy:
+    image: caddy:2
+    container_name: cogito-caddy
+    networks:
+      - cogito-net
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    restart: unless-stopped
+
+networks:
+  cogito-net:
+    external: true
+    name: cogito-net
+
+volumes:
+  caddy_data:
