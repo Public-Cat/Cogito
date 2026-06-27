@@ -1,6 +1,6 @@
 import { io } from "socket.io-client";
 
-const BASE = "http://192.168.1.32:3000";
+const BASE = process.env.COGITO_URL || "http://192.168.1.32:3000";
 
 async function main() {
   console.log("=== E2E Test: Lobby + One Submit/Reveal Cycle ===\n");
@@ -8,7 +8,7 @@ async function main() {
 
   // 0. Reset any stale session
   t("Resetting stale session...");
-  const resetSocket = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
+  const resetSocket = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
   await new Promise(r => resetSocket.on("connect", r));
   // lobby:reset requires the caller to be a lan host, so join first to
   // become host of any leftover/empty session before resetting it.
@@ -22,7 +22,7 @@ async function main() {
 
   // 1. Player A (host) joins
   t("Player A (host) joining...");
-  const socketA = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
+  const socketA = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
   await new Promise(r => socketA.on("connect", r));
 
   const lobbyA = await new Promise(r => {
@@ -35,7 +35,7 @@ async function main() {
 
   // 2. Player B joins
   t("Player B joining...");
-  const socketB = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
+  const socketB = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
   await new Promise(r => socketB.on("connect", r));
 
   // Set up host's listener BEFORE emitting so there's no race

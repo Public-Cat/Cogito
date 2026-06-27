@@ -1,6 +1,6 @@
 import { io } from "socket.io-client";
 
-const BASE = "http://192.168.1.32:3000";
+const BASE = process.env.COGITO_URL || "http://192.168.1.32:3000";
 
 async function main() {
   console.log("=== Rejoin Test: Mid-Game Reconnection ===\n");
@@ -8,7 +8,7 @@ async function main() {
 
   // 0. Reset any stale session
   t("Resetting stale session...");
-  const resetSocket = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
+  const resetSocket = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
   await new Promise(r => resetSocket.on("connect", r));
   // lobby:reset requires the caller to be a lan host, so join first to
   // become host of any leftover/empty session before resetting it.
@@ -22,7 +22,7 @@ async function main() {
 
   // 1. Two players join lobby
   t("Player A joining...");
-  const sA = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
+  const sA = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
   await new Promise(r => sA.on("connect", r));
   const la = await new Promise(r => {
     sA.emit("lobby:setName", { name: "Alice" });
@@ -34,7 +34,7 @@ async function main() {
   if (!la.isHost) throw new Error("FAIL: Player A should be host");
   if (!aliceToken) throw new Error("FAIL: lobby:state should include myToken");
 
-  const sB = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
+  const sB = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
   await new Promise(r => sB.on("connect", r));
   const lb = await new Promise(r => {
     sB.emit("lobby:setName", { name: "Bob" });
@@ -62,7 +62,7 @@ async function main() {
   sA.disconnect();
   await new Promise(r => setTimeout(r, 300));
 
-  const sA2 = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' } });
+  const sA2 = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
   await new Promise(r => sA2.on("connect", r));
   t("New socket connected, sending game:rejoin...");
 
