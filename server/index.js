@@ -10,12 +10,19 @@ import { topics } from './game/topics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
+// Loopback default keeps dev safe; docker-compose and the dev npm script set HOST=0.0.0.0 explicitly.
 const HOST = process.env.HOST || '127.0.0.1';
 
 // CORS allow-list: restrict Socket.IO handshakes to known origins. Override
 // via ALLOWED_ORIGINS (comma-separated) for self-hosted domains/LAN names.
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ||
-  'https://cogito.example.com,https://cogito.home.arpa').split(',').map(s => s.trim());
+// If ALLOWED_ORIGINS is set but contains only empty/whitespace values after
+// parsing, we warn loudly rather than silently producing [''] which rejects all.
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean)
+  : ['https://cogito.example.com', 'https://cogito.home.arpa'];
+if (ALLOWED_ORIGINS.length === 0) {
+  console.warn('[CORS] ALLOWED_ORIGINS is set but contains only empty/whitespace values — all browser connections will be blocked by CORS.');
+}
 
 const RULES_PATH = path.join(__dirname, '..', 'RULES.md');
 let rulesText = '';

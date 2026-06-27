@@ -1,4 +1,5 @@
-import { randomBytes } from 'node:crypto';
+// Socket.IO event handlers — all game and lobby interactions flow through here.
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import gameManager from '../game/GameManager.js';
 import { getCachedModels } from '../ollama/OllamaClient.js';
 
@@ -9,44 +10,66 @@ const NAME_REGEX = /^[a-zA-Z0-9 ]{1,20}$/;
 const MODEL_REGEX = /^[\w.:/-]{1,100}$/;
 const MAX_MESSAGE_LENGTH = 500;
 const MAX_AI_PLAYERS = 8;
+const MAX_HUMAN_PLAYERS = 12;
 const MAX_TOPIC_LENGTH = 120;
 
 function sanitize(str) {
   return str.replace(/[<>&"']/g, '');
 }
 
-// ---- Lightweight per-socket rate limiting (no deps) ----
-// Map<socketId, Map<eventName, number[]>> — timestamps (ms) of recent hits.
+// ---- Lightweight per-address rate limiting (no deps) ----
+// Map<clientKey, Map<eventName, number[]>> — timestamps (ms) of recent hits.
+// Keyed by socket.handshake.address (client IP) so reconnecting clients don't
+// bypass limits by getting a new socket.id. Buckets are never cleared on
+// disconnect; a periodic sweep removes stale entries to bound memory growth.
 const rateBuckets = new Map();
 
 /**
  * Token-bucket-ish fixed-window limiter: allow at most `max` calls of
- * `event` per `windowMs` for a given socket. Returns true if allowed.
- * @param {string} socketId
+ * `event` per `windowMs` for a given client key. Returns true if allowed.
+ * @param {string} key - Client identity key (IP address or socket.id fallback).
  * @param {string} event
  * @param {number} max
  * @param {number} windowMs
  * @returns {boolean}
  */
-function allowRate(socketId, event, max, windowMs) {
-  let perSocket = rateBuckets.get(socketId);
-  if (!perSocket) {
-    perSocket = new Map();
-    rateBuckets.set(socketId, perSocket);
+function allowRate(key, event, max, windowMs) {
+  let perClient = rateBuckets.get(key);
+  if (!perClient) {
+    perClient = new Map();
+    rateBuckets.set(key, perClient);
   }
   const now = Date.now();
-  const hits = (perSocket.get(event) || []).filter(t => now - t < windowMs);
+  const hits = (perClient.get(event) || []).filter(t => now - t < windowMs);
   if (hits.length >= max) {
-    perSocket.set(event, hits);
+    perClient.set(event, hits);
     return false;
   }
   hits.push(now);
-  perSocket.set(event, hits);
+  perClient.set(event, hits);
   return true;
 }
 
-function clearRateBucket(socketId) {
-  rateBuckets.delete(socketId);
+// Periodically prune rate-bucket entries that have had no recent activity.
+// Windows are at most 10 s; 60 s is a safe cleanup threshold.
+setInterval(() => {
+  const cutoff = Date.now() - 60_000;
+  for (const [key, perClient] of rateBuckets) {
+    const hasRecent = [...perClient.values()].some(hits => hits.some(t => t > cutoff));
+    if (!hasRecent) rateBuckets.delete(key);
+  }
+}, 5 * 60_000).unref();
+
+/**
+ * Constant-time string equality using crypto.timingSafeEqual.
+ * Returns false when either argument is not a string or lengths differ.
+ * @param {*} a
+ * @param {*} b
+ * @returns {boolean}
+ */
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
 /**
@@ -62,10 +85,36 @@ function requireLanHost(session, socket) {
   return true;
 }
 
+/**
+ * Build the per-recipient lobby:state payload for a single player.
+ * Scopes myToken and sessionCode to the owning player only — these are
+ * never broadcast to other players.
+ * @param {object} session - The current GameSession.
+ * @param {object} player - The recipient Player.
+ * @param {string[]} models - Cached Ollama model list.
+ * @returns {object}
+ */
+function lobbyStateFor(session, player, models) {
+  const base = session.getLobbyState();
+  const host = session.getHost();
+  const isHost = host?.socketId === player.socketId;
+  return {
+    ...base,
+    models,
+    myId: player.id,
+    myToken: player.rejoinToken || null,
+    isHost,
+    sessionCode: isHost ? session.sessionCode : undefined,
+  };
+}
+
 export function registerHandlers(io, socket) {
+  // Key rate-limit buckets by client IP so a reconnect doesn't reset the counter.
+  const rateKey = socket.handshake.address || socket.id;
+
   socket.on('lobby:setName', async ({ name, code } = {}) => {
     try {
-      if (!allowRate(socket.id, 'lobby:setName', 5, 10000)) {
+      if (!allowRate(rateKey, 'lobby:setName', 5, 10000)) {
         socket.emit('error', { message: 'Too many requests — slow down.' });
         return;
       }
@@ -75,7 +124,7 @@ export function registerHandlers(io, socket) {
       // the session — so a public player can never spin up a session, and
       // there's nothing to join until the LAN host has joined.
       const existing = gameManager.getSession();
-      if (socket.data.realm === 'public' && (!existing || code !== existing.sessionCode)) {
+      if (socket.data.realm === 'public' && (!existing || !safeEqual(code, existing.sessionCode))) {
         socket.emit('error', { message: 'Invalid session code.' });
         return;
       }
@@ -89,9 +138,20 @@ export function registerHandlers(io, socket) {
 
       let player = session.getPlayerBySocket(socket.id);
       if (player) {
+        // Existing player updating their name — always allowed.
         player.name = sanitizedName;
         console.log(`[HUMAN] Player "${sanitizedName}" updated name`);
       } else {
+        // Brand-new join — only permitted while in the lobby, and within the cap.
+        if (session.state !== 'LOBBY') {
+          socket.emit('error', { message: 'Game is already in progress.' });
+          return;
+        }
+        const humanCount = session.players.filter(p => p.isHuman).length;
+        if (humanCount >= MAX_HUMAN_PLAYERS) {
+          socket.emit('error', { message: `Lobby is full (max ${MAX_HUMAN_PLAYERS} human players).` });
+          return;
+        }
         const playerId = gameManager.generatePlayerId();
         player = session.addPlayer(playerId, true, socket.id);
         player.name = sanitizedName;
@@ -102,33 +162,11 @@ export function registerHandlers(io, socket) {
 
       session.assignHost();
       const models = getCachedModels();
-      const myId = session.getPlayerBySocket(socket.id)?.id || null;
-      const state = {
-        players: session.players.map(p => ({
-          id: p.id,
-          name: p.name,
-          isHuman: p.isHuman,
-          isHost: p.isHost,
-        })),
-        myId,
-        myToken: player.rejoinToken,
-        models,
-        isHost: session.getHost()?.socketId === socket.id,
-        // Host-only: the code public friends need to join. Never sent to others.
-        sessionCode: session.getHost()?.socketId === socket.id ? session.sessionCode : undefined,
-      };
-      socket.emit('lobby:state', state);
+      socket.emit('lobby:state', lobbyStateFor(session, player, models));
 
       const host = session.getHost();
       if (host && host.socketId !== socket.id) {
-        const hostState = {
-          ...state,
-          myId: host.id,
-          myToken: host.rejoinToken,
-          isHost: true,
-          sessionCode: session.sessionCode,
-        };
-        io.to(host.socketId).emit('lobby:state', hostState);
+        io.to(host.socketId).emit('lobby:state', lobbyStateFor(session, host, models));
         io.to(host.socketId).emit('host:assigned');
       }
     } catch (err) {
@@ -206,7 +244,7 @@ export function registerHandlers(io, socket) {
 
   socket.on('game:sendMessage', ({ text } = {}) => {
     try {
-      if (!allowRate(socket.id, 'game:sendMessage', 1, 1000)) {
+      if (!allowRate(rateKey, 'game:sendMessage', 1, 1000)) {
         socket.emit('error', { message: 'Sending too fast — slow down.' });
         return;
       }
@@ -243,7 +281,7 @@ export function registerHandlers(io, socket) {
 
   socket.on('game:castVote', ({ targetId } = {}) => {
     try {
-      if (!allowRate(socket.id, 'game:castVote', 5, 10000)) {
+      if (!allowRate(rateKey, 'game:castVote', 5, 10000)) {
         socket.emit('error', { message: 'Too many requests — slow down.' });
         return;
       }
@@ -314,7 +352,7 @@ export function registerHandlers(io, socket) {
 
   socket.on('game:rejoin', ({ playerId, token } = {}) => {
     try {
-      if (!allowRate(socket.id, 'game:rejoin', 5, 10000)) {
+      if (!allowRate(rateKey, 'game:rejoin', 5, 10000)) {
         socket.emit('error', { message: 'Too many requests — slow down.' });
         return;
       }
@@ -323,7 +361,7 @@ export function registerHandlers(io, socket) {
       if (!currentSession || currentSession.state === 'LOBBY') return;
       const player = currentSession.getPlayer(playerId);
       if (!player) return;
-      if (!player.rejoinToken || token !== player.rejoinToken) {
+      if (!player.rejoinToken || !safeEqual(token, player.rejoinToken)) {
         socket.emit('error', { message: 'Invalid rejoin token.' });
         return;
       }
@@ -338,23 +376,16 @@ export function registerHandlers(io, socket) {
 
   socket.on('disconnect', () => {
     try {
-      clearRateBucket(socket.id);
       const currentSession = gameManager.getSession();
       if (currentSession) {
         const disconnectedPlayer = currentSession.getPlayerBySocket(socket.id);
         if (disconnectedPlayer) console.log(`[HUMAN] Player "${disconnectedPlayer.name}" disconnected`);
         currentSession.handleDisconnect(socket.id);
         if (currentSession.state === 'LOBBY') {
-          const lobbyState = currentSession.getLobbyState();
           const models = getCachedModels();
           for (const p of currentSession.players) {
             if (p.socketId) {
-              io.to(p.socketId).emit('lobby:state', {
-                ...lobbyState, models, myId: p.id, myToken: p.rejoinToken || null,
-                isHost: currentSession.getHost()?.socketId === p.socketId,
-                sessionCode: currentSession.getHost()?.socketId === p.socketId
-                  ? currentSession.sessionCode : undefined,
-              });
+              io.to(p.socketId).emit('lobby:state', lobbyStateFor(currentSession, p, models));
             }
           }
         } else {
@@ -362,6 +393,10 @@ export function registerHandlers(io, socket) {
           if (host && host.socketId) {
             io.to(host.socketId).emit('host:assigned');
           }
+          // Push updated disconnect status to all clients immediately so they
+          // don't wait until the next phase transition to see the [DISCONNECTED]
+          // marker and updated vote-eligibility counts.
+          currentSession.emitGameState();
         }
       }
     } catch (err) {
