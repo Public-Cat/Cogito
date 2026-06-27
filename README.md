@@ -157,6 +157,12 @@ The host will see all available models in the game lobby configuration panel. Mo
 
 ---
 
+## Planned
+
+- **Remote host support via Discord webhook** — rotating host secret + join code delivered to a Discord channel so games can be started by friends when the operator is away from the LAN. See [`docs/superpowers/specs/2026-06-26-remote-host-discord-webhook-design.md`](docs/superpowers/specs/2026-06-26-remote-host-discord-webhook-design.md).
+
+---
+
 ## License
 
 MIT. Go wild. Just don't let the AIs know.
