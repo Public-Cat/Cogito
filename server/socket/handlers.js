@@ -17,11 +17,21 @@ function sanitize(str) {
   return str.replace(/[<>&"']/g, '');
 }
 
-// ---- Lightweight per-address rate limiting (no deps) ----
+// ---- Lightweight rate limiting (no deps) ----
 // Map<clientKey, Map<eventName, number[]>> — timestamps (ms) of recent hits.
-// Keyed by socket.handshake.address (client IP) so reconnecting clients don't
-// bypass limits by getting a new socket.id. Buckets are never cleared on
-// disconnect; a periodic sweep removes stale entries to bound memory growth.
+// Two keying strategies (see registerHandlers):
+//   - Pre-join actions (lobby:setName, game:rejoin) key by client IP so a
+//     reconnect can't reset the counter — this is the join/token brute-force
+//     surface. NOTE: behind a reverse proxy, socket.handshake.address is the
+//     PROXY's IP, so these limits are shared across all proxied clients until
+//     the real client IP is sourced from a trusted X-Forwarded-For header.
+//   - In-game actions (game:sendMessage, game:castVote) key by the joined
+//     player's id: stable across reconnects (reclaiming an id needs the rejoin
+//     token) and, crucially, not collapsed when many players share one
+//     proxy/NAT IP (which would otherwise let one player's message exhaust the
+//     shared 1/s allowance for everyone).
+// Buckets are never cleared on disconnect; a periodic sweep removes stale
+// entries to bound memory growth.
 const rateBuckets = new Map();
 
 /**
@@ -59,6 +69,26 @@ setInterval(() => {
     if (!hasRecent) rateBuckets.delete(key);
   }
 }, 5 * 60_000).unref();
+
+/**
+ * Best-effort real client IP for rate-limiting behind a reverse proxy.
+ * Caddy appends the connecting peer's IP to X-Forwarded-For, so the rightmost
+ * entry is the address our trusted proxy actually saw (a client can prepend
+ * forged hops but cannot control the one Caddy adds). Falls back to the direct
+ * socket address when there's no proxy header.
+ * NOTE: for public traffic arriving via Cloudflare Tunnel the rightmost hop is
+ * cloudflared; use CF-Connecting-IP there if you want per-client granularity.
+ * @param {object} socket - Socket.IO socket.
+ * @returns {string}
+ */
+function clientIp(socket) {
+  const xff = socket.handshake.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff.length) {
+    const parts = xff.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
+  return socket.handshake.address || socket.id;
+}
 
 /**
  * Constant-time string equality using crypto.timingSafeEqual.
@@ -109,12 +139,20 @@ function lobbyStateFor(session, player, models) {
 }
 
 export function registerHandlers(io, socket) {
-  // Key rate-limit buckets by client IP so a reconnect doesn't reset the counter.
-  const rateKey = socket.handshake.address || socket.id;
+  // Pre-join actions key by real client IP (via X-Forwarded-For behind the
+  // proxy) so a reconnect doesn't reset the counter. Limits here are generous
+  // enough to tolerate a whole household/LAN party joining from one IP while
+  // still throttling join-code / token brute-force.
+  const rateKey = clientIp(socket);
+  // In-game actions key by the joined player's stable id (falls back to the IP
+  // key before the socket has joined). Prevents many players behind one proxy/
+  // NAT IP from sharing — and exhausting — a single per-action bucket.
+  const playerRateKey = () =>
+    gameManager.getSession()?.getPlayerBySocket(socket.id)?.id || rateKey;
 
   socket.on('lobby:setName', async ({ name, code } = {}) => {
     try {
-      if (!allowRate(rateKey, 'lobby:setName', 5, 10000)) {
+      if (!allowRate(rateKey, 'lobby:setName', 20, 10000)) {
         socket.emit('error', { message: 'Too many requests — slow down.' });
         return;
       }
@@ -244,7 +282,7 @@ export function registerHandlers(io, socket) {
 
   socket.on('game:sendMessage', ({ text } = {}) => {
     try {
-      if (!allowRate(rateKey, 'game:sendMessage', 1, 1000)) {
+      if (!allowRate(playerRateKey(), 'game:sendMessage', 1, 1000)) {
         socket.emit('error', { message: 'Sending too fast — slow down.' });
         return;
       }
@@ -281,7 +319,7 @@ export function registerHandlers(io, socket) {
 
   socket.on('game:castVote', ({ targetId } = {}) => {
     try {
-      if (!allowRate(rateKey, 'game:castVote', 5, 10000)) {
+      if (!allowRate(playerRateKey(), 'game:castVote', 5, 10000)) {
         socket.emit('error', { message: 'Too many requests — slow down.' });
         return;
       }
@@ -352,7 +390,7 @@ export function registerHandlers(io, socket) {
 
   socket.on('game:rejoin', ({ playerId, token } = {}) => {
     try {
-      if (!allowRate(rateKey, 'game:rejoin', 5, 10000)) {
+      if (!allowRate(rateKey, 'game:rejoin', 20, 10000)) {
         socket.emit('error', { message: 'Too many requests — slow down.' });
         return;
       }
