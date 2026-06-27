@@ -50,8 +50,9 @@ cd cogito-game
 docker compose up --build
 ```
 
-Then open `http://192.168.1.32:3008` in your browser (port and IP are
-configured in `docker-compose.yml` — adjust for your network).
+The container publishes no host port — access is via a Caddy reverse proxy
+attached to the `cogito-net` Docker network. See `deploy/DEPLOY.md` for the
+full operator runbook.
 
 To let other players join from phones on the same network (dev mode), share:
 
@@ -77,13 +78,13 @@ Opens on `http://localhost:3000` (configurable via `PORT`).
 3. Host hits **START** when at least 2 humans and 1 AI are in the lobby.
 4. At game start, AI players automatically generate their own names.
 5. **Other humans** join via the same URL and pick their names.
-6. All players write simultaneously in a 15-second SUBMITTING phase. Messages are held server-side.
+6. All players write simultaneously in a 45-second SUBMITTING phase. Messages are held server-side.
 7. After the timer (or when all have submitted), messages are revealed together in a 10-second REVEALING phase.
 8. After round 2, a voting phase occurs after every round:
    - A 5-second VOTING_SOON warning is shown.
    - AIs rank players privately and simultaneously (server-side via Ollama) on who they think is human.
    - Each active human casts a single vote (no ranking) for the one player they want eliminated — votes count as much as an AI's top pick. Humans can vote out other humans to chase a sole-survivor win, or band together to vote out every AI.
-   - The player with the highest combined score is eliminated (or no one, if it stays tied).
+   - The player with the highest combined score is eliminated (a random pick among tied leaders if tiebreakers don't resolve it).
    - A 3-second delay shows the result before the next round begins.
 9. Game ends when all AIs or all humans are eliminated.
 

@@ -79,7 +79,7 @@ cogito-game/
 
 - The server maintains **one game session at a time**, managed by `GameManager.js`.
 - `GameManager` is a singleton module-level object. It holds a reference to the current `GameSession` instance (or `null` if no game is active).
-- When a game ends and all players return to the lobby, `GameManager` resets (`this.currentSession = null; this.playerCounter = 0`).
+- When a game ends and all players return to the lobby, `GameManager` resets (`this.currentSession = null`).
 
 ### Host Assignment
 
@@ -92,7 +92,7 @@ See `AGENTS.md` for the current socket event reference — it is the authoritati
 ### Game State Machine
 
 ```
-LOBBY → SUBMITTING (15s) → REVEALING (10s) → loop (round<2) → VOTING_SOON (5s) → VOTING (20s) → (3s delay) → SUBMITTING or ENDED
+LOBBY → SUBMITTING (45s) → REVEALING (10s) → loop (round<2) → VOTING_SOON (5s) → VOTING (40s) → (3s delay) → SUBMITTING or ENDED
 ```
 
 States are constants in `GameSession.js`:
@@ -101,11 +101,11 @@ const STATES = { LOBBY, SUBMITTING, REVEALING, VOTING_SOON, VOTING, ENDED };
 ```
 
 - **LOBBY**: Players joining, host configuring.
-- **SUBMITTING**: All active players write simultaneously (15s timer). Humans type in UI; AIs generate via `generateAIMessage()` in parallel. `pendingMessages` collected until all submit or timer expires. Early resolve if all submit before timer.
+- **SUBMITTING**: All active players write simultaneously (45s timer). Humans type in UI; AIs generate via `generateAIMessage()` in parallel. `pendingMessages` collected until all submit or timer expires. Early resolve if all submit before timer.
 - **REVEALING**: `pendingMessages` broadcast via `game:newMessage` and appended to `this.messages` (10s timer). Round counter increments.
 - **Round 2+ check**: After REVEALING, if `round >= 2`, transition to `VOTING_SOON`. Otherwise, loop back to SUBMITTING.
 - **VOTING_SOON**: 5-second warning. Emits `game:votingSoon`.
-- **VOTING**: AI rankings via Ollama (`collectAIRankings()`, `Promise.allSettled`) plus single-target human votes (`castHumanVote()`, via `game:castVote`), both collected for the full 10s timeout. Borda count aggregates AI rankings and human votes (each human vote = a full first-place pick) into one score per player; highest total eliminated. Tiebreaker: ranked/voted highest in more individual rankings/votes wins; still tied → cumulative Borda history breaks it; still tied → random pick among the still-tied leaders. Emit `game:voteResult`. 3-second `setTimeout` then `checkWinCondition()`.
+- **VOTING**: AI rankings via Ollama (`collectAIRankings()`, `Promise.allSettled`) plus single-target human votes (`castHumanVote()`, via `game:castVote`), both collected for the full 40s timeout (early resolve if all humans have voted before AI rankings finish, or vice versa). Borda count aggregates AI rankings and human votes (each human vote = a full first-place pick) into one score per player; highest total eliminated. Tiebreaker: ranked/voted highest in more individual rankings/votes wins; still tied → cumulative Borda history breaks it; still tied → random pick among the still-tied leaders. Emit `game:voteResult`. 3-second `setTimeout` then `checkWinCondition()`.
 - **ENDED**: Emit `game:ended`. Players call `game:returnToLobby` → `GameManager.reset()`.
 
 ### emitToAll / emitToSocket
@@ -124,7 +124,7 @@ The initial `game:state` is emitted directly via `io.to(p.socketId).emit()` in t
 - All game state lives in `GameSession.js`. Never in socket handlers.
 - `getGameState()` returns the full snapshot with `submittedBy[]`, `activePlayerCount`, `phase`, etc.
 - `game:state` emitted after **every state transition** (`emitGameState()` sends per-player with `myId`).
-- Reconnection via `game:rejoin({ playerId })`: updates `socketId`, clears `isDisconnected`, emits fresh `game:state`.
+- Reconnection via `game:rejoin({ playerId, token })`: verifies the per-player `rejoinToken`, updates `socketId`, clears `isDisconnected`, emits fresh `game:state`.
 - AI name generation at game start (`startGame()`): duplicates retried up to 10 times, fallback `AI-xxxx`.
 
 ---
@@ -161,7 +161,7 @@ The game does **not** use round-robin turns. All AIs generate messages simultane
    - Calls `chat(ai.model, messages)` — note the turn prompt is NOT appended to history before the call (avoids mutation on failure).
    - On success: pushes `{ role: "user", content: buildTurnPrompt() }` then `{ role: "assistant", content: reply }` to `ai.messageHistory`.
    - Adds the reply to `pendingMessages` and marks the AI as submitted.
-3. If all active players (humans + AIs) submit before the 15s timer, `resolveSubmitPhase()` fires early.
+3. If all active players (humans + AIs) submit before the 45s timer, `resolveSubmitPhase()` fires early.
 
 ### Round Transcript Appending
 
@@ -184,8 +184,8 @@ When the voting phase begins (`startVoting()`):
    - Call `chat(ai.model, ai.messageHistory)`.
    - Push the model's reply as `{ role: "assistant", content: reply }` to history.
    - Parse the reply: split on `[,;\n]`, then fuzzy case-insensitive `includes()` match tokens against active player names (longest-first), deduplicated. Store ordered array in `this.aiRankings` Map. Empty array if unparseable (zero points from that AI).
-3. In parallel, active connected humans may emit `game:castVote { targetId }`, handled by `castHumanVote(player, targetId)`: rejects votes outside VOTING phase, from eliminated/disconnected players, self-votes, or invalid/eliminated targets. Valid votes are stored in `this.humanVotes` (`Map<voterId, targetId>`) and broadcast as `game:voteProgress { votedCount, totalEligible }`. No early-resolve — votes are collected for the full 10s window same as AI rankings.
-4. Once all AI rankings are collected (or the 10s `voteTimeout` fires), call `tryResolveRankings()` → `resolveRankings()`.
+3. In parallel, active connected humans may emit `game:castVote { targetId }`, handled by `castHumanVote(player, targetId)`: rejects votes outside VOTING phase, from eliminated/disconnected players, self-votes, or invalid/eliminated targets. Valid votes are stored in `this.humanVotes` (`Map<voterId, targetId>`) and broadcast as `game:voteProgress { votedCount, totalEligible }`. Early resolve happens via `tryResolveRankings()` when both conditions are met: AI rankings done AND all active humans have voted.
+4. Once all AI rankings are collected and all humans have voted (or the 40s `voteTimeout` fires), call `tryResolveRankings()` → `resolveRankings()`.
 5. `resolveRankings()` implements **Borda count**: each AI's ranking awards `(N-1-i)` points to position `i` (first gets N-1, last gets 0). Each human vote awards a flat `N-1` points to its target — the same weight as an AI's top-ranked pick. All points sum into one `bordaScores` Map. Highest total eliminated.
 6. Tiebreaker: if Borda ties, the tied player ranked/voted highest (earliest) in more individual AI rankings *or* human votes wins (a human vote always counts as "earliest" for its target). If still tied, cumulative Borda history across all prior rounds breaks it. If still tied, a random pick among the still-tied leaders eliminates one — a symmetric standoff (e.g. the final 1-human-vs-1-AI endgame, where each side targets the other every round) would otherwise tie identically forever and the game would never end.
 7. Emit `game:voteResult`. After a 3-second `setTimeout`, call `checkWinCondition()`.
@@ -299,14 +299,14 @@ export function getCachedModels() { ... }           // Returns cached model list
 ```
 
 - `chat()` must handle Ollama errors gracefully. If Ollama is unreachable or returns an error, log the error server-side and return a fallback string `"..."` so the game is not blocked.
-- Set a **timeout of 30 seconds** on chat requests, 5 seconds on model list requests (via `AbortController`).
+- Set a **timeout of 60 seconds** on chat requests, 5 seconds on model list requests (via `AbortController`).
 - Model list is polled every 30s via `setInterval`, cached in a module-level variable. `getModels()` also refreshes on demand with debounce.
 - The `messages` array passed to `/api/chat` must include the system prompt as the first message with `role: "system"`.
 - Default Ollama URL: `http://192.168.1.30:11434` (configurable via `OLLAMA_BASE_URL`).
 
 ### Docker Network
 
-- Docker Compose uses a fixed IP binding (`192.168.1.32:3000:3000`), custom bridge network `cogito-net`, `cap_drop: ALL`, and `no-new-privileges:true`.
+- Docker Compose publishes **no host ports**. The container is reachable only via the `cogito-net` bridge network, which the operator attaches their own Caddy container to (see `deploy/DEPLOY.md`).
 - The Ollama base URL must be configurable via `OLLAMA_BASE_URL` (default: `http://192.168.1.30:11434`).
 - No `extra_hosts` / `host.docker.internal` — the default Ollama URL points directly to the LAN IP of the Ollama host.
 
@@ -330,20 +330,24 @@ CMD ["node", "server/index.js"]
 
 ```yaml
 services:
-  app:
+  cogito:
+    container_name: cogito
     build: .
-    ports:
-      - "192.168.1.32:3000:3000"
+    networks:
+      - cogito-net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
     environment:
       - NODE_ENV=production
       - OLLAMA_BASE_URL=http://192.168.1.30:11434
       - PORT=3000
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    networks:
-      - cogito-net
+      - HOST=0.0.0.0
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
     restart: unless-stopped
 
 networks:
@@ -352,7 +356,7 @@ networks:
     driver: bridge
 ```
 
-No database. No volumes. No external services other than Ollama. The specific IP bindings are for the deployment environment — adjust for your network.
+No database. No volumes. No published ports — access is via a Caddy reverse proxy on `cogito-net` (see `deploy/DEPLOY.md`). Set `ALLOWED_ORIGINS` in a `.env` file alongside docker-compose (copy `.env.example`).
 
 ---
 

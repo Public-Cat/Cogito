@@ -41,11 +41,11 @@ Tests are plain Node scripts — no test framework. They exit `process.exit(0|1)
 
 **Cogito** is a real-time social deduction game: humans and LLMs share a chat room and try to identify each other. The server is stateful (one game at a time, all state in memory), with no database.
 
-> Deeper references live in the repo: `AGENTS.md` (authoritative socket-event reference and current gotchas), `DEVELOPMENT.md` (full architecture/implementation spec), `RULES.md` (player-facing rules, served via `GET /api/rules`). Keep this file in sync with `AGENTS.md` when behavior changes.
+> Deeper references live in the repo: `AGENTS.md` (socket-event reference and gotchas), `DEVELOPMENT.md` (full architecture/implementation spec), `RULES.md` (player-facing rules, served via `GET /api/rules`). When behavior changes, update **both** this file and `AGENTS.md`; where they conflict, verify against the actual code (AGENTS.md has some stale entries).
 
 ### Backend (`server/`)
 
-- **`index.js`** — Express app entry, Socket.IO init, serves static client files, exposes `GET /api/models` and `GET /api/rules`.
+- **`index.js`** — Express app entry, Socket.IO init, serves static client files, exposes `GET /api/models`, `GET /api/rules`, and `GET /api/topics`.
 - **`game/GameManager.js`** — Singleton. Holds one `GameSession` instance (or `null`). Has `getOrCreateSession()`, `reset()`, `generatePlayerId()` (returns a random UUID — never a guessable sequential id). `reset()` must call `session.clearTimers()` before nulling the session.
 - **`game/GameSession.js`** — The core state machine. Owns all game state. Never store game state in socket handlers. `assignHost()` only promotes **LAN-realm** humans (see Security). Ollama calls are bounded by a `promisePool` (max 4 in flight).
 - **`game/Player.js`** — Player model. Key fields: `isHuman`, `isEliminated`, `isDisconnected`, `messageHistory[]`, `model`, `currentVote`, `realm` (`'lan'`|`'public'`), `rejoinToken` (per-player secret). Disconnected AIs remain active (generate messages, vote); disconnected humans are excluded from active players and cannot vote.
@@ -57,7 +57,7 @@ Tests are plain Node scripts — no test framework. They exit `process.exit(0|1)
 ### Game State Machine
 
 ```
-LOBBY → SUBMITTING (45s) → REVEALING (10s) → [loop if round<2] → VOTING_SOON (5s) → VOTING (20s) → [3s delay] → SUBMITTING or ENDED
+LOBBY → SUBMITTING (45s) → REVEALING (10s) → [loop if round<2] → VOTING_SOON (5s) → VOTING (40s) → [3s delay] → SUBMITTING or ENDED
 ```
 
 Minimum **2 humans + 1 AI** to start. Voting begins at round ≥ 2.
@@ -67,7 +67,8 @@ Minimum **2 humans + 1 AI** to start. Voting begins at round ≥ 2.
 ### AI Behavior
 
 - **Message generation**: All AIs run `generateAIMessage()` in parallel during SUBMITTING. Each AI gets `[...messageHistory, turnPrompt]` sent to Ollama; the turn prompt is not appended to history until after a successful reply. After all messages are revealed, each AI's history gets a single `user` transcript entry with other players' messages from that round.
-- **Voting (combined AI + human Borda count)**: `collectAIRankings()` runs all AI rankings in parallel (`Promise.allSettled`, 20s timeout); each AI ranks all active players from most suspicious to least (position 0 = N-1 points, ..., last = 0). In parallel, each active, connected human casts one vote via `game:castVote` → `castHumanVote()`, counted as a full first-place pick (N-1 points), same weight as an AI's top choice. Self-votes and votes from eliminated/disconnected players are rejected. All points sum into one score; highest eliminated. Resolves early when all humans have voted and all AI rankings are done; otherwise waits for the full 20s timeout, then `resolveRankings()`. Tiebreaker 1: ranked/voted highest (earliest) in more individual AI rankings or human votes. Tiebreaker 2: cumulative Borda history across all prior rounds. Tiebreaker 3 (final, guarantees progress): random pick among the still-tied leaders — without it, a symmetric standoff (each side targets the other every round, notably the final 1-human-vs-1-AI endgame) ties identically forever and the game never ends.
+- **Voting (combined AI + human Borda count)**: `collectAIRankings()` runs all AI rankings in parallel (`Promise.allSettled`, 20s timeout); each AI ranks all active players from most suspicious to least (position 0 = N-1 points, ..., last = 0). In parallel, each active, connected human casts one vote via `game:castVote` → `castHumanVote()`, counted as a full first-place pick (N-1 points), same weight as an AI's top choice. Self-votes and votes from eliminated/disconnected players are rejected. All points sum into one score; highest eliminated. Resolves early when all humans have voted and all AI rankings are done; otherwise waits for the full 40s timeout, then `resolveRankings()`. Tiebreaker 1: ranked/voted highest (earliest) in more individual AI rankings or human votes. Tiebreaker 2: cumulative Borda history across all prior rounds. Tiebreaker 3 (final, guarantees progress): random pick among the still-tied leaders — without it, a symmetric standoff (each side targets the other every round, notably the final 1-human-vs-1-AI endgame) ties identically forever and the game never ends.
+- **Personality**: Each AI gets a random `personality` from the `PERSONALITIES` array (`skeptical`, `enthusiastic`, `thoughtful`, `dry`, `curious`, `anxious`) injected into `buildSystemPrompt()`.
 - **Prompts**: `buildSystemPrompt`, `buildTurnPrompt`, `buildRankingPrompt`, `buildNamePrompt` — all in `prompts.js`.
 
 ### Frontend (`client/`)

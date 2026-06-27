@@ -42,7 +42,7 @@ All tests are plain Node scripts (no framework), exit via `process.exit(0|1)`. N
 - Tests connect to `http://192.168.1.32:3000` (dev server port 3000, not Docker port 3008).
 
 ## Game state machine
-`LOBBY → SUBMITTING (45s) → REVEALING (20s) → (loop, round<2) → VOTING_SOON (5s) → VOTING (40s) → (3s delay) → SUBMITTING or ENDED`
+`LOBBY → SUBMITTING (45s) → REVEALING (10s) → (loop, round<2) → VOTING_SOON (5s) → VOTING (40s) → (3s delay) → SUBMITTING or ENDED`
 
 Minimum **2 humans + 1 AI** to start. Voting starts round ≥ 2, then every round.
 
@@ -68,8 +68,8 @@ Minimum **2 humans + 1 AI** to start. Voting starts round ≥ 2, then every roun
 - **`emitToAll` / `emitToSocket`** must be set by `lobby:start` handler *before* calling `startGame()`. `startSubmitPhase()` → `emitGameState()` needs them. Crashes if unset.
 - **AI disconnect asymmetry**: `getActiveAIs()` filters only by `isEliminated` — disconnected AIs still generate messages and vote. Only humans lose active status on disconnect (`getActivePlayers()` checks `isDisconnected`).
 - **AI vote parsing**: Ranking responses split on `[,;\n]`, then fuzzy case-insensitive `includes()` match against player names (longest-first), deduplicated. Unparseable = empty ranking (zero points).
-- **Vote resolution**: Combined AI+human Borda count. Each AI ranks all other players from most suspicious to least (points: first = N-1, ..., last = 0). Each active, non-disconnected human casts a single vote for one other player (self-votes rejected server-side) — counted as a full N-1 "first place" pick, same weight as an AI's top choice. All points sum into one score per player; highest total eliminated. Tiebreaker: among tied players, the one ranked/voted highest (earliest) in more individual AI rankings or human votes wins. 3rd-level: cumulative Borda history across all prior voting rounds breaks remaining ties. 4th-level (final, guarantees progress): if still tied, no elimination (progress is guaranteed because the asymmetric AI+human scoring and cumulative history practically never stalemate). Disconnected humans don't vote (humans have no input device while offline, unlike autonomous AIs).
-- **Human vote casting**: `game:castVote { targetId }` → `GameSession.castHumanVote(player, targetId)`. Rejects votes outside VOTING phase, from eliminated/disconnected players, self-votes, or invalid/eliminated targets. No early-resolve on full participation — votes are collected for the full 40s VOTE_TIMEOUT_MS window like AI rankings, then resolved at the existing `voteTimeout`.
+- **Vote resolution**: Combined AI+human Borda count. Each AI ranks all other players from most suspicious to least (points: first = N-1, ..., last = 0). Each active, non-disconnected human casts a single vote for one other player (self-votes rejected server-side) — counted as a full N-1 "first place" pick, same weight as an AI's top choice. All points sum into one score per player; highest total eliminated. Tiebreaker: among tied players, the one ranked/voted highest (earliest) in more individual AI rankings or human votes wins. 3rd-level: cumulative Borda history across all prior voting rounds breaks remaining ties. 4th-level (final, guarantees progress): random pick among the still-tied leaders — without it, a symmetric standoff (e.g. 1-human-vs-1-AI) would tie identically forever. Disconnected humans don't vote (humans have no input device while offline, unlike autonomous AIs).
+- **Human vote casting**: `game:castVote { targetId }` → `GameSession.castHumanVote(player, targetId)`. Rejects votes outside VOTING phase, from eliminated/disconnected players, self-votes, or invalid/eliminated targets. Early resolve via `tryResolveRankings()` when both AI rankings are done AND all active humans have voted; otherwise the full 40s `voteTimeout` fires.
 - **AI memory**: `messageHistory[]` per AI (system prompt + turn prompts + round transcripts of others' messages).
 - **AI personality**: Each AI gets a random `personality` from `PERSONALITIES` array (`skeptical`, `enthusiastic`, `thoughtful`, `dry`, `curious`, `anxious`) — injected into `buildSystemPrompt()` to temper tone.
 - **AI name generation**: Via `buildNamePrompt()`, retries on duplicates (up to 10 tries), fallback `AI-xxxx`.
@@ -83,7 +83,7 @@ Minimum **2 humans + 1 AI** to start. Voting starts round ≥ 2, then every roun
 
 Full `game:state` emitted after every state transition. `game:ended.players` includes `model` for each AI. `myToken` (the per-player `rejoinToken`) is sent ONLY to its owning socket — never broadcast or attached to other players' entries. Likewise `sessionCode` on `lobby:state` is sent ONLY to the host's socket.
 
-**Reset distinction**: `lobby:reset` calls `gameManager.reset()` + broadcasts empty `lobby:state` to ALL connected sockets. `game:returnToLobby` does not broadcast — emits `lobby:state` with `isHost: true` only to the caller. **Both now require a LAN-realm host** (`requireLanHost()`); a public-realm or non-host socket is rejected with `error`. (`lobby:start` also gates on `requireLanHost()`.)
+**Reset distinction**: both `lobby:reset` and `game:returnToLobby` call `gameManager.reset()` and broadcast an empty `lobby:state` to ALL connected sockets (so no one is stranded on a defunct end screen); `game:returnToLobby` then sends a second `lobby:state` with `isHost: true` to the caller only. **Both require a LAN-realm host** (`requireLanHost()`); a public-realm or non-host socket is rejected with `error`. (`lobby:start` also gates on `requireLanHost()`.)
 
 ## Security / access control
 Built for public hosting via **Cloudflare Tunnel → Caddy → app**. See `deploy/DEPLOY.md`, `deploy/Caddyfile`, `deploy/cloudflared-config.yml`.
