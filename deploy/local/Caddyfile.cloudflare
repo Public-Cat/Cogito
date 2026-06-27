@@ -1,0 +1,33 @@
+# Full-stack Caddyfile: LAN vhost + public vhost for cloudflare tunnel testing.
+# Used only by docker-compose.full-stack.yml (NOT the standalone caddy harness).
+# COGITO_PUBLIC_DOMAIN is read from the container environment — set it in
+# deploy/local/.env.cloudflared (see .env.cloudflared.example).
+
+{
+	# .home.arpa can't get a public ACME cert; use Caddy's internal CA. Don't
+	# auto-redirect :80 -> :443 so a plain curl smoke test still works.
+	auto_https disable_redirects
+}
+
+# LAN path — never tunneled.
+cogito.home.arpa {
+	tls internal
+	reverse_proxy cogito:3000 {
+		# SECURITY: `header_up` with a value uses Set, which REPLACES any
+		# X-Cogito-Realm a client tried to send — so this alone is safe. Do NOT
+		# add `header_up -X-Cogito-Realm`: Caddy applies deletes AFTER sets, so a
+		# delete on the same field strips the value we just set and the app
+		# falls back to realm=public (no host privileges).
+		header_up X-Cogito-Realm lan
+	}
+}
+
+# Public path — reached from cloudflared on cogito-net.
+# Cloudflare's edge terminates the public TLS cert; the `tls internal` cert here
+# is only seen by the cloudflared container on the private Docker network.
+{$COGITO_PUBLIC_DOMAIN} {
+	tls internal
+	reverse_proxy cogito:3000 {
+		header_up X-Cogito-Realm public
+	}
+}

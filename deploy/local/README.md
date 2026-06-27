@@ -54,6 +54,86 @@ docker compose -f deploy/local/docker-compose.caddy.yml down
 docker compose down
 ```
 
+---
+
+## Full-stack cloudflare tunnel test
+
+`docker-compose.full-stack.yml` extends the LAN-only harness above with a
+`cloudflare/cloudflared` container, so you can verify the complete production
+path — public Cloudflare domain → cloudflared → Caddy → app — without touching
+your real server.
+
+### One-time setup
+
+**1. Create your env file** (gitignored):
+
+```bash
+cp deploy/local/.env.cloudflared.example deploy/local/.env.cloudflared
+# Edit it: fill in TUNNEL_TOKEN and COGITO_PUBLIC_DOMAIN
+```
+
+Get `TUNNEL_TOKEN` from the Cloudflare Zero Trust dashboard:
+Networks → Tunnels → your tunnel → Overview → "Install connector" → copy the
+token from the Docker command.
+
+**2. Add the public domain to `ALLOWED_ORIGINS`** in the root `.env`:
+
+```
+ALLOWED_ORIGINS=https://cogito.home.arpa,https://your.domain.com
+```
+
+**3. Configure tunnel routing in the Cloudflare dashboard** (Networks → Tunnels
+→ your tunnel → Public Hostname):
+
+| Field | Value |
+|---|---|
+| Hostname | your.domain.com |
+| Service | `https://cogito-caddy:443` |
+| TLS → No TLS Verify | ✓ enabled (Caddy uses an internal CA) |
+
+`cogito-caddy` resolves inside Docker because cloudflared and Caddy share the
+`cogito-net` network.
+
+### Bring it up
+
+```bash
+docker compose up -d --build                                              # app
+docker compose -f deploy/local/docker-compose.full-stack.yml up -d       # caddy + cloudflared
+```
+
+This file is an **alternative** to `docker-compose.caddy.yml`, not an overlay.
+Don't run both at the same time — they share the container name `cogito-caddy`.
+
+### Verify
+
+Watch cloudflared connect:
+
+```bash
+docker logs -f cogito-cloudflared
+# Look for: "Registered tunnel connection" and no errors
+```
+
+Then hit your public domain in a browser or with curl:
+
+```bash
+curl -I https://your.domain.com/
+```
+
+And confirm the realm header on the cogito side:
+
+```bash
+docker logs cogito | grep realm
+# Should show realm: public for the public-domain requests
+# and realm: lan for any cogito.home.arpa requests
+```
+
+### Tear down
+
+```bash
+docker compose -f deploy/local/docker-compose.full-stack.yml down
+docker compose down
+```
+
 ## Gotcha: editing the Caddyfile
 
 The Caddyfile is bind-mounted as a single file. If you edit it with an editor

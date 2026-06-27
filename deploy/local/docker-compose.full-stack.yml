@@ -1,0 +1,55 @@
+# Full-stack local test: Caddy (LAN + public vhost) + cloudflared tunnel.
+# Runs alongside the root docker-compose.yml (which provides the app + cogito-net).
+#
+# Usage (from repo root):
+#   1. cp deploy/local/.env.cloudflared.example deploy/local/.env.cloudflared
+#      Fill in TUNNEL_TOKEN and COGITO_PUBLIC_DOMAIN.
+#   2. Add the public domain to ALLOWED_ORIGINS in the root .env:
+#         ALLOWED_ORIGINS=https://cogito.home.arpa,https://your.domain.com
+#   3. Cloudflare dashboard → your tunnel → Public Hostname:
+#         Hostname: your.domain.com
+#         Service:  https://cogito-caddy:443
+#         TLS:      enable "No TLS Verify" (Caddy uses an internal CA)
+#   4. docker compose up -d --build
+#   5. docker compose -f deploy/local/docker-compose.full-stack.yml up -d
+#
+# This is an ALTERNATIVE to docker-compose.caddy.yml, not an overlay.
+# Do not run both at the same time — they share the container name cogito-caddy.
+#
+# Tear down:
+#   docker compose -f deploy/local/docker-compose.full-stack.yml down
+#   docker compose down
+
+services:
+  caddy:
+    image: caddy:2
+    container_name: cogito-caddy
+    networks:
+      - cogito-net
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - .env.cloudflared
+    volumes:
+      - ./Caddyfile.cloudflare:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cogito-cloudflared
+    command: tunnel --no-autoupdate run
+    env_file:
+      - .env.cloudflared
+    networks:
+      - cogito-net
+    restart: unless-stopped
+
+networks:
+  cogito-net:
+    external: true
+    name: cogito-net
+
+volumes:
+  caddy_data:
