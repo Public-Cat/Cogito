@@ -66,10 +66,6 @@ docker compose -f deploy/local/docker-compose.caddy.yml up -d --force-recreate
 
 ## Why `header_up X-Cogito-Realm` has no `-` strip line
 
-Caddy applies header **deletes after sets**, so a `header_up -X-Cogito-Realm`
-"strip first" line removes the realm value the very next `set` adds — the
-upstream then receives no header and the app falls back to `realm=public`
-(LAN clients silently lose host privileges). `header_up`'s Set already
-*replaces* any value a client tried to forge, so a single set line is both
-sufficient and safe. This was the root cause of "joining from LAN doesn't grant
-host" — see the fixed `deploy/Caddyfile`.
+See DEPLOY.md Section 1 — Caddy applies deletes after sets, so a strip line
+wipes the realm value the set just added. One `header_up X-Cogito-Realm lan`
+line is both sufficient and safe.

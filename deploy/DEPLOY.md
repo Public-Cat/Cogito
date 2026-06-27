@@ -41,6 +41,8 @@ deletes after sets, so it would wipe the realm and leave every client
 `public` (see `deploy/Caddyfile`). The app must trust this header only because
 Caddy is the sole thing on `cogito-net` that can reach it.
 
+**Local testing:** `deploy/local/` has a standalone Caddy harness that reproduces the realm-gating layer without Cloudflare; see its README.
+
 ## 2. App environment
 
 Set these in `docker-compose.yml` (or an `.env` file consumed by it):

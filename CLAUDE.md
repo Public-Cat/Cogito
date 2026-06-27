@@ -97,7 +97,7 @@ Designed for public hosting via **Cloudflare Tunnel → Caddy (HTTPS) → app** 
 - **Public join gate (who can play).** A random 6-character join code (`A-Z`+`2-9`, ambiguous chars removed) is generated per session in the `GameSession` constructor and shown only to the host (host-only `sessionCode` on `lobby:state`). Public-realm joins must send a matching `code` in `lobby:setName` against the **existing** session — public players can't create a session, so nothing is joinable until a LAN host has joined (LAN bypasses the check and is what creates the session). A new code is generated on every reset / return-to-lobby. No env var.
 - **Identity / abuse.** Player ids are random UUIDs; each player gets a `rejoinToken` and `game:rejoin` must present `{ playerId, token }`. CORS restricted via `ALLOWED_ORIGINS`. `lobby:start` validates model names against the cached Ollama list, caps AI players at `MAX_AI_PLAYERS` (8), and sanitizes/length-caps `topic`. Per-socket rate limits on `lobby:setName`, `game:sendMessage`, `game:castVote`, `game:rejoin`.
 
-Operator runbook + Cloudflare config live in `deploy/` (`DEPLOY.md`, `Caddyfile` — a snippet to add to your own Caddy, not a managed service — `cloudflared-config.yml`).
+Operator runbook + Cloudflare config live in `deploy/` (`DEPLOY.md`, `Caddyfile` — a snippet to add to your own Caddy, not a managed service — `cloudflared-config.yml`). `deploy/local/` is a standalone Caddy harness for local realm-security testing (see `deploy/local/README.md`).
 
 ## Conventions
 
