@@ -435,19 +435,22 @@ export class GameSession {
         } else {
           console.log(`[AI] ${ai.name} ranking: could not parse from "${rankingResponse}"`);
         }
+        this.emitVoteProgress();
       } catch (err) {
         console.error(`AI ranking failed for ${ai.name}:`, err.message);
         this.aiRankings.set(ai.id, []);
+        this.emitVoteProgress();
       }
     });
 
     // Each task already catches its own errors, so the pool (built on
     // Promise.all over workers) is equivalent to the prior Promise.allSettled.
-    // Intentionally does not call tryResolveRankings(): per design, voting
-    // always runs the full VOTE_TIMEOUT_MS window so humans aren't cut off
-    // just because AI rankings finished quickly. Only the voteTimeout fires resolution.
     await promisePool(rankingTasks, MAX_CONCURRENT_OLLAMA_CALLS);
     this.aiRankingsResolved = true;
+    // If all humans already voted while AIs were ranking, resolve early.
+    if (this.humanVotes.size >= this.getActiveHumans().length) {
+      this.tryResolveRankings();
+    }
   }
 
   parseRankingResponse(response, activePlayers, excludeId) {
@@ -486,11 +489,19 @@ export class GameSession {
     this.humanVotes.set(player.id, targetId);
     player.currentVote = targetId;
     console.log(`[HUMAN] ${player.name} voted for ${target.name}`);
-    this.emitToAll('game:voteProgress', {
-      votedCount: this.humanVotes.size,
-      totalEligible: this.getActiveHumans().length,
-    });
+    this.emitVoteProgress();
+    // If all humans are in and AI rankings finished, no need to wait for the timeout.
+    if (this.aiRankingsResolved && this.humanVotes.size >= this.getActiveHumans().length) {
+      this.tryResolveRankings();
+    }
     return true;
+  }
+
+  emitVoteProgress() {
+    this.emitToAll('game:voteProgress', {
+      votedCount: this.humanVotes.size + this.aiRankings.size,
+      totalEligible: this.getActivePlayers().length,
+    });
   }
 
   tryResolveRankings() {
