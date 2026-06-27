@@ -1,3 +1,13 @@
+// All AI prompt builders — do not inline prompt strings elsewhere.
+
+/**
+ * Build the system prompt sent once per AI at game start.
+ * @param {string} playerName - The AI's chosen display name.
+ * @param {string} topic - The current discussion topic.
+ * @param {string[]} allPlayerNames - Names of all players in the game (human + AI).
+ * @param {string|null} [personalityTrait=null] - One-word personality modifier from the PERSONALITIES
+ *   array (e.g. 'skeptical', 'enthusiastic'). Injected as a tone hint; null = no personality line.
+ */
 export function buildSystemPrompt(playerName, topic, allPlayerNames, personalityTrait = null) {
   const others = allPlayerNames.filter(n => n !== playerName);
 
