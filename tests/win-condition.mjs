@@ -85,9 +85,66 @@ function testSoloWinTriggersInstantlyEvenWithAIsAlive() {
   console.log('  PASS: sole survivor wins instantly with AIs still alive');
 }
 
+function testDisconnectedHumanDoesNotTriggerSoloWin() {
+  // A human who disconnects (transient, supported rejoin path) but is NOT
+  // eliminated must NOT trigger a solo win. Previously checkWinCondition() and
+  // determineWinner() excluded isDisconnected from aliveHumans, so a refresh
+  // during the 3s postVoteTimer window spuriously ended the game.
+  const session = makeSession();
+  const h1 = session.addPlayer('h1', true, 's1'); h1.name = 'Alice';
+  const h2 = session.addPlayer('h2', true, 's2'); h2.name = 'Bob';
+  const ai1 = session.addPlayer('ai1', false, null); ai1.name = 'Eve'; ai1.messageHistory = [];
+
+  // h2 disconnects (browser refresh) — NOT eliminated
+  h2.isDisconnected = true;
+
+  // With the fix, both Alice (connected) and Bob (disconnected) count as alive.
+  // No win condition should fire — the game should continue.
+  session.round = 3;
+  session.state = 'VOTING'; // simulate state just before checkWinCondition is called
+  session.checkWinCondition();
+
+  if (session.state === 'ENDED') {
+    throw new Error('FAIL: disconnected-not-eliminated human spuriously triggered solo win');
+  }
+  console.log('  PASS: disconnected-not-eliminated human does not trigger solo win');
+}
+
+function testSoleNonEliminatedHumanWinsEvenIfDisconnected() {
+  // The sole surviving human wins even if they happen to be disconnected at the
+  // moment checkWinCondition fires — being disconnected is transient, not a
+  // disqualification from the solo win.
+  const session = makeSession();
+  const h1 = session.addPlayer('h1', true, 's1'); h1.name = 'Alice';
+  const h2 = session.addPlayer('h2', true, 's2'); h2.name = 'Bob';
+  const ai1 = session.addPlayer('ai1', false, null); ai1.name = 'Eve'; ai1.messageHistory = [];
+
+  // Eliminate h1 (voted out)
+  h1.isEliminated = true;
+  // h2 is the sole non-eliminated human but happens to be disconnected right now
+  h2.isDisconnected = true;
+
+  session.round = 3;
+  session.state = 'VOTING';
+  session.checkWinCondition();
+
+  if (session.state !== 'ENDED') {
+    throw new Error(`FAIL: expected solo win for disconnected-but-alive Bob, got state=${session.state}`);
+  }
+  if (!session.endResult || session.endResult.winner !== 'solo' || session.endResult.winnerPlayerId !== h2.id) {
+    throw new Error(`FAIL: expected solo win for Bob, got endResult=${JSON.stringify(session.endResult)}`);
+  }
+  console.log('  PASS: sole non-eliminated human wins even while temporarily disconnected');
+}
+
 console.log('=== Win Condition Tests ===');
 let failures = 0;
-for (const test of [test1v1StandoffResolves, testSoloWinTriggersInstantlyEvenWithAIsAlive]) {
+for (const test of [
+  test1v1StandoffResolves,
+  testSoloWinTriggersInstantlyEvenWithAIsAlive,
+  testDisconnectedHumanDoesNotTriggerSoloWin,
+  testSoleNonEliminatedHumanWinsEvenIfDisconnected,
+]) {
   try {
     test();
   } catch (err) {
