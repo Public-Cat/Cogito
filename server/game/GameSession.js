@@ -563,29 +563,28 @@ export class GameSession {
       bordaScores.set(p.id, 0);
     }
 
+    // Normalized Borda: score each position relative to N-1 (the expected full
+    // ranking length) rather than the actual parsed length. Position i earns
+    // max(0, N-2-i) points, so the top pick always gets N-2 — matching a human
+    // vote — regardless of whether the AI listed all players or just one.
+    // Secondary positions still count and contribute to the tally.
+    const humanVotePoints = Math.max(1, activePlayers.length - 2);
+
     for (const ranking of this.aiRankings.values()) {
-      const n = ranking.length;
-      for (let i = 0; i < n; i++) {
-        // Standard Borda: first gets n-1, last gets 0.
-        // Edge case: ranking only 1 player (only 2 active, one is the AI itself) → give 1 point.
-        const points = n === 1 ? 1 : (n - 1 - i);
-        bordaScores.set(ranking[i], (bordaScores.get(ranking[i]) || 0) + points);
+      for (let i = 0; i < ranking.length; i++) {
+        const points = Math.max(0, humanVotePoints - i);
+        if (points === 0) break; // remaining positions score 0
+        const targetId = ranking[i];
+        if (!bordaScores.has(targetId)) continue; // target no longer active
+        bordaScores.set(targetId, bordaScores.get(targetId) + points);
       }
     }
 
-    // Human votes match an AI's top-pick weight. Each AI ranks N-1 others and
-    // awards N-2 points to first place, so human votes are worth Math.max(1, N-2)
-    // — the same as an AI's highest pick. Floor at 1 so the tiny-game edge case
-    // (2 active players) still awards a point.
-    // Only count votes from players still active (connected, not eliminated) and
-    // only toward targets still in bordaScores (active at resolution time), so a
-    // vote cast before a player disconnected doesn't skew the tally.
-    const humanVotePoints = Math.max(1, activePlayers.length - 2);
     const activeHumanIds = new Set(this.getActiveHumans().map(p => p.id));
     for (const [voterId, targetId] of this.humanVotes.entries()) {
       if (!activeHumanIds.has(voterId)) continue; // voter has since disconnected
       if (!bordaScores.has(targetId)) continue;    // target is no longer active
-      bordaScores.set(targetId, (bordaScores.get(targetId) || 0) + humanVotePoints);
+      bordaScores.set(targetId, bordaScores.get(targetId) + humanVotePoints);
     }
 
     // Accumulate into cumulative Borda history for future tiebreaker use
@@ -683,14 +682,10 @@ export class GameSession {
       return winner;
     }
 
-    // Level 4 tiebreaker: random pick among the still-tied leaders. Without this,
-    // a symmetric standoff (each side ranks/votes the other every round, most
-    // notably the final 1-human-vs-1-AI endgame) ties identically forever at
-    // every prior level and the game never reaches a winner.
+    // All tiebreakers exhausted — no elimination this round.
     const tiedNames = tiedPlayerIds.map(id => this.getPlayer(id)?.name).join(', ');
-    const winner = this.getPlayer(leaders[randomInt(leaders.length)][0]);
-    console.log(`[GAME] Borda tie unresolved after cumulative history — random tiebreak: ${winner.name} eliminated among [${tiedNames}]`);
-    return winner;
+    console.log(`[GAME] Perfect tie unresolved — no elimination this round [${tiedNames}]`);
+    return null;
   }
 
   checkWinCondition() {

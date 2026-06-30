@@ -27,32 +27,25 @@ function runVotingRound(session, { aiRankings, humanVotes }) {
   session.checkWinCondition(); // normally fired 3s later by postVoteTimer
 }
 
-function test1v1StandoffResolves() {
+function test1v1StandoffProducesNoElimination() {
+  // When all tiebreakers are exhausted (symmetric 1v1 standoff: each side votes
+  // the other every round, scores and history stay identical), no one is eliminated.
   const session = makeSession();
   const h1 = session.addPlayer('h1', true, 's1'); h1.name = 'Bob';
   const ai1 = session.addPlayer('ai1', false, null); ai1.name = 'Eve'; ai1.messageHistory = [];
-  session.round = 5; // already past round 2, so every round votes
+  session.round = 5;
 
-  // Each side targets the other every round — the natural, expected play —
-  // which previously tied forever (first-place counts AND cumulative history
-  // stay symmetric round after round) and the game never ended.
-  const MAX_ROUNDS = 10;
-  let rounds = 0;
-  while (session.state !== 'ENDED' && rounds < MAX_ROUNDS) {
-    runVotingRound(session, {
-      aiRankings: [[ai1.id, [h1.id]]],
-      humanVotes: [[h1.id, ai1.id]],
-    });
-    rounds++;
-  }
+  runVotingRound(session, {
+    aiRankings: [[ai1.id, [h1.id]]],
+    humanVotes: [[h1.id, ai1.id]],
+  });
 
-  if (session.state !== 'ENDED') {
-    throw new Error(`FAIL: 1-human-vs-1-AI standoff never resolved after ${MAX_ROUNDS} rounds (still ${session.state})`);
+  if (h1.isEliminated || ai1.isEliminated) {
+    throw new Error(`FAIL: perfect tie should produce no elimination (h1.isEliminated=${h1.isEliminated}, ai1.isEliminated=${ai1.isEliminated})`);
   }
-  if (!h1.isEliminated && !ai1.isEliminated) {
-    throw new Error('FAIL: game ended without eliminating either standoff player');
-  }
-  console.log(`  PASS: standoff resolved after ${rounds} round(s), state=ENDED`);
+  // checkWinCondition() correctly ends the game via sole-survivor rule (1 human still
+  // alive after the tied round), so session.state may be ENDED — that's expected.
+  console.log('  PASS: symmetric 1v1 standoff produces no elimination');
 }
 
 function testSoloWinTriggersInstantlyEvenWithAIsAlive() {
@@ -137,13 +130,86 @@ function testSoleNonEliminatedHumanWinsEvenIfDisconnected() {
   console.log('  PASS: sole non-eliminated human wins even while temporarily disconnected');
 }
 
+function testPartialAIParsingDoesNotLetHumanVotesDominate() {
+  // Bug: when LLM output only yields 1 name (partial parse, ranking.length=1),
+  // the n===1 branch fires, giving AI's top pick just 1 pt. Meanwhile
+  // humanVotePoints = N-2 = 3, so 2 human votes (6 pts) beat 3 AI top-picks
+  // (3 pts) and the wrong player is eliminated.
+  const session = makeSession();
+  const h1 = session.addPlayer('h1', true, 's1'); h1.name = 'Alice';
+  const h2 = session.addPlayer('h2', true, 's2'); h2.name = 'Bob';
+  const ai1 = session.addPlayer('ai1', false, null); ai1.name = 'Eve'; ai1.messageHistory = [];
+  const ai2 = session.addPlayer('ai2', false, null); ai2.name = 'Mallory'; ai2.messageHistory = [];
+  const ai3 = session.addPlayer('ai3', false, null); ai3.name = 'Zara'; ai3.messageHistory = [];
+
+  session.round = 1; // resolveRevealPhase increments to 2, triggering voting
+
+  runVotingRound(session, {
+    aiRankings: [
+      [ai1.id, [h1.id]], // partial parse: only top pick listed (n=1)
+      [ai2.id, [h1.id]],
+      [ai3.id, [h1.id]],
+    ],
+    humanVotes: [
+      [h1.id, ai1.id],
+      [h2.id, ai1.id],
+    ],
+  });
+
+  if (!h1.isEliminated) {
+    throw new Error(
+      `FAIL: 3 AI top-picks for h1 should outweigh 2 human votes for ai1 ` +
+      `(h1.isEliminated=${h1.isEliminated}, ai1.isEliminated=${ai1.isEliminated})`
+    );
+  }
+  console.log('  PASS: 3 concentrated AI top-picks beat 2 human votes even with partial rankings');
+}
+
+function testSecondaryAIVotesAccumulateCorrectly() {
+  // Secondary Borda positions are intentional: if 2 AIs also suspect ai1 (rank
+  // it second) and 2 humans vote for ai1, that combined signal should outweigh
+  // 3 AIs having h1 as their top pick. N=5: top-pick worth 3 pts, second 2 pts.
+  // h1 total = 3×3 = 9; ai1 total = 2 secondary (2+2) + 2 human (3+3) = 10.
+  const session = makeSession();
+  const h1 = session.addPlayer('h1', true, 's1'); h1.name = 'Alice';
+  const h2 = session.addPlayer('h2', true, 's2'); h2.name = 'Bob';
+  const ai1 = session.addPlayer('ai1', false, null); ai1.name = 'Eve'; ai1.messageHistory = [];
+  const ai2 = session.addPlayer('ai2', false, null); ai2.name = 'Mallory'; ai2.messageHistory = [];
+  const ai3 = session.addPlayer('ai3', false, null); ai3.name = 'Zara'; ai3.messageHistory = [];
+
+  session.round = 1;
+
+  runVotingRound(session, {
+    aiRankings: [
+      [ai1.id, [h1.id, h2.id, ai2.id, ai3.id]],         // h1 #1
+      [ai2.id, [h1.id, ai1.id, h2.id, ai3.id]],          // h1 #1, ai1 #2
+      [ai3.id, [h1.id, ai1.id, h2.id, ai2.id]],          // h1 #1, ai1 #2
+    ],
+    humanVotes: [
+      [h1.id, ai1.id],
+      [h2.id, ai1.id],
+    ],
+  });
+
+  // ai1 should be eliminated: 10 pts (4 secondary AI + 6 human) > h1's 9 pts (3 primary AI picks)
+  if (!ai1.isEliminated) {
+    throw new Error(
+      `FAIL: ai1 (10 pts) should beat h1 (9 pts) when secondary AI + human votes accumulate ` +
+      `(h1.isEliminated=${h1.isEliminated}, ai1.isEliminated=${ai1.isEliminated})`
+    );
+  }
+  console.log('  PASS: secondary AI Borda votes correctly accumulate with human votes');
+}
+
 console.log('=== Win Condition Tests ===');
 let failures = 0;
 for (const test of [
-  test1v1StandoffResolves,
+  test1v1StandoffProducesNoElimination,
   testSoloWinTriggersInstantlyEvenWithAIsAlive,
   testDisconnectedHumanDoesNotTriggerSoloWin,
   testSoleNonEliminatedHumanWinsEvenIfDisconnected,
+  testPartialAIParsingDoesNotLetHumanVotesDominate,
+  testSecondaryAIVotesAccumulateCorrectly,
 ]) {
   try {
     test();
