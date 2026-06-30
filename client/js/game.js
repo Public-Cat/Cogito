@@ -422,8 +422,10 @@ socket.on('game:state', (state) => {
   } else if (state.phase === 'REVEALING') {
     stopCountdowns();
     startRevealCountdown();
-  } else if (state.phase === 'VOTING') {
-    stopCountdowns();
+  } else if (state.phase === 'VOTING_SOON') {
+    // Leave voteSoonInterval running — game:votingSoon already started it.
+    if (submitCountdownInterval) { clearInterval(submitCountdownInterval); submitCountdownInterval = null; }
+    if (revealCountdownInterval) { clearInterval(revealCountdownInterval); revealCountdownInterval = null; }
   } else {
     stopCountdowns();
   }
