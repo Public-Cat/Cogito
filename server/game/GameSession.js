@@ -434,11 +434,11 @@ export class GameSession {
   async collectAIRankings() {
     const aiPlayers = this.getActiveAIs();
     const activePlayers = this.getActivePlayers();
-    const activePlayerNames = activePlayers.map(p => p.name);
 
     const rankingTasks = aiPlayers.map(ai => async () => {
       try {
-        const prompt = buildRankingPrompt(activePlayerNames, this.lastElimination);
+        const othersNames = activePlayers.filter(p => p.id !== ai.id).map(p => p.name);
+        const prompt = buildRankingPrompt(othersNames, this.lastElimination);
         ai.messageHistory.push({ role: 'user', content: prompt });
         const rankingResponse = await chat(ai.model, ai.messageHistory);
         ai.messageHistory.push({ role: 'assistant', content: rankingResponse });

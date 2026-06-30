@@ -78,7 +78,7 @@ Consider these clues when deciding:
 
 ${eliminationNote}Players: ${activePlayerNames.join(', ')}
 
-Reply with a comma-separated list ordered from most suspicious to least suspicious. Do not include yourself.`;
+Reply with a comma-separated list ordered from most suspicious to least suspicious.`;
 }
 
 /**
