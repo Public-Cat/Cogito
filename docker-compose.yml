@@ -18,21 +18,20 @@ services:
       # HOST controls which interface the Node process binds inside the
       # container — it does NOT make this safe to expose on the LAN/WAN.
       # No port is published to the host at all: the only access path is
-      # the `cogito-net` network below. Connect your own Caddy container to
-      # `cogito-net` (see deploy/DEPLOY.md section 3) — don't attach
+      # the `cogito-net` network below, which deploy/docker-compose.yml's
+      # `caddy` service attaches to (see deploy/README.md) — don't attach
       # anything else to it.
       - HOST=0.0.0.0
       # SECURITY: set ALLOWED_ORIGINS in a .env file next to this compose file
-      # (copy .env.example) — must match the vhost blocks you add to your own
-      # Caddyfile (see deploy/DEPLOY.md). Comma-separated, no spaces.
+      # (copy .env.example) — must match the vhost blocks in deploy/Caddyfile
+      # (see deploy/README.md). Comma-separated, no spaces.
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
     restart: unless-stopped
 
 networks:
-  # This repo does not create or manage Caddy — it just defines the network
-  # Caddy needs to join to reach Cogito by container name (`cogito:3000`).
-  # See deploy/DEPLOY.md section 3 for how to attach your existing Caddy
-  # container to this network.
+  # Defines the network Caddy needs to join to reach Cogito by container name
+  # (`cogito:3000`). deploy/docker-compose.yml's `caddy` service attaches to
+  # this network as `external` — see deploy/README.md.
   cogito-net:
     name: cogito-net
     driver: bridge

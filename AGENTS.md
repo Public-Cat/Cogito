@@ -25,7 +25,7 @@
 | `node tests/ui-interactive.mjs` | Playwright UI test (2 humans + 1 AI) |
 | `node tests/ui-6p4ai.mjs` | Playwright UI test (6 humans + 4 AIs) |
 | `node tests/security.mjs` | Access-control surface (realm/code/token/rejoin) |
-| `node tests/join.mjs` | LAN join test via Caddy (see deploy/local/README.md) |
+| `node tests/join.mjs` | LAN join test via Caddy (see deploy/README.md section 2) |
 | `node tests/ui-realm-code.mjs` | Playwright: session-code hidden for LAN realm |
 | `node tests/ai-eval.mjs` | Model-comparison eval (env: MODELS, AI_COUNT, TOPIC, etc.) |
 | `node tests/win-condition.mjs` | Unit test — no server/Ollama needed, runs GameSession directly |
@@ -86,8 +86,8 @@ Full `game:state` emitted after every state transition. `game:ended.players` inc
 **Reset distinction**: both `lobby:reset` and `game:returnToLobby` call `gameManager.reset()` and broadcast an empty `lobby:state` to ALL connected sockets (so no one is stranded on a defunct end screen); `game:returnToLobby` then sends a second `lobby:state` with `isHost: true` to the caller only. **Both require a LAN-realm host** (`requireLanHost()`); a public-realm or non-host socket is rejected with `error`. (`lobby:start` also gates on `requireLanHost()`.)
 
 ## Security / access control
-Built for public hosting via **Cloudflare Tunnel → Caddy → app**. See `deploy/DEPLOY.md`, `deploy/Caddyfile`, `deploy/cloudflared-config.yml`.
-- **Realm**: `server/index.js` sets `socket.data.realm` from the `X-Cogito-Realm` header (`'lan'` only if exactly `lan`, else `'public'` — fail safe). Caddy sets this header per vhost with a single `header_up X-Cogito-Realm <realm>` (Set replaces any client-forged value; a `-X-Cogito-Realm` strip would be applied *after* the set and wipe the realm — don't add it); this repo doesn't run Caddy itself — `cogito` publishes no host port and is only reachable from the `cogito-net` Docker network (the operator connects their own Caddy container to it, see `deploy/DEPLOY.md`), which is what makes the header trustworthy. Only `lan` humans can become host (`assignHost()` filters by realm).
+Built for public hosting via **Cloudflare Tunnel → Caddy → app**. See `deploy/README.md`, `deploy/Caddyfile`, `deploy/docker-compose.yml`.
+- **Realm**: `server/index.js` sets `socket.data.realm` from the `X-Cogito-Realm` header (`'lan'` only if exactly `lan`, else `'public'` — fail safe). Caddy sets this header per vhost with a single `header_up X-Cogito-Realm <realm>` (Set replaces any client-forged value; a `-X-Cogito-Realm` strip would be applied *after* the set and wipe the realm — don't add it); `cogito` itself publishes no host port and is only reachable from the `cogito-net` Docker network — the `caddy` container in `deploy/docker-compose.yml` is what's attached to it (or, if you run your own Caddy elsewhere, you connect it instead — see `deploy/README.md` section 4), which is what makes the header trustworthy. Only `lan` humans can become host (`assignHost()` filters by realm).
 - **Join gate**: per-session join code, auto-generated in the `GameSession` constructor (6 chars, `A-Z`+`2-9` minus ambiguous `O/0/I/1/L`). Public-realm `lobby:setName` must send a matching `code` against the *existing* session — so a public player can't create a session, and there's nothing to join until a LAN host has joined (LAN bypasses the check and is what creates the session). The code is sent only to the host (host-only `sessionCode` on `lobby:state`) and regenerated on every reset / return-to-lobby. No env var.
 - **Identity**: `generatePlayerId()` = random UUID; per-player `rejoinToken`; `game:rejoin` verifies `{ playerId, token }`.
 - **Limits**: CORS `ALLOWED_ORIGINS`; `lobby:start` validates models vs cached Ollama list (skipped if cache empty), caps AI at `MAX_AI_PLAYERS=8`, sanitizes/caps `topic` (≤120); `promisePool` caps Ollama concurrency at 4; per-socket rate limits on `lobby:setName`, `game:sendMessage`, `game:castVote`, `game:rejoin`.
@@ -98,8 +98,8 @@ Built for public hosting via **Cloudflare Tunnel → Caddy → app**. See `deplo
 - On failure, returns `"..."` — does not crash.
 
 ## Docker
-- `node:20-alpine`, `npm ci --omit=dev`, runs as non-root (`USER node`). Service `cogito` publishes no host port; reachable only via the `cogito-net` Docker network, which the operator connects their own pre-existing Caddy container to (see `deploy/DEPLOY.md`) — `read_only: true` + `tmpfs: /tmp`, `cap_drop: ALL`, `no-new-privileges:true`, `restart: unless-stopped`.
-- Env: `HOST=0.0.0.0` (listen on the container interface; isolation comes from having no published port and being on `cogito-net`, not from HOST), plus `ALLOWED_ORIGINS`, `OLLAMA_BASE_URL`. Set real values before deploying (see `deploy/DEPLOY.md`). (The join code is auto-generated per session — no env var.)
+- `node:20-alpine`, `npm ci --omit=dev`, runs as non-root (`USER node`). Service `cogito` publishes no host port; reachable only via the `cogito-net` Docker network, which the `caddy` container in `deploy/docker-compose.yml` attaches to (see `deploy/README.md`) — `read_only: true` + `tmpfs: /tmp`, `cap_drop: ALL`, `no-new-privileges:true`, `restart: unless-stopped`.
+- Env: `HOST=0.0.0.0` (listen on the container interface; isolation comes from having no published port and being on `cogito-net`, not from HOST), plus `ALLOWED_ORIGINS`, `OLLAMA_BASE_URL`. Set real values before deploying (see `deploy/README.md`). (The join code is auto-generated per session — no env var.)
 - `.dockerignore` excludes `*.md` but preserves `!RULES.md` — `RULES.md` is included in the image to serve via `GET /api/rules`.
 
 ## Historical bugs (don't reintroduce)

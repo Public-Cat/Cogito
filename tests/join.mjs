@@ -10,7 +10,7 @@
 //   3. Only the host sees the per-session sessionCode; tokens are per-player.
 //
 // Requires the stack up: `docker compose up -d` then
-// `docker compose -f deploy/local/docker-compose.caddy.yml up -d`, and
+// `docker compose -f deploy/docker-compose.yml up -d`, and
 // cogito.home.arpa resolving to the host running Caddy.
 //
 // Override the URL for local pre-DNS checks, e.g.:

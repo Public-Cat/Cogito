@@ -306,7 +306,7 @@ export function getCachedModels() { ... }           // Returns cached model list
 
 ### Docker Network
 
-- Docker Compose publishes **no host ports**. The container is reachable only via the `cogito-net` bridge network, which the operator attaches their own Caddy container to (see `deploy/DEPLOY.md`).
+- Docker Compose publishes **no host ports**. The container is reachable only via the `cogito-net` bridge network, which the `caddy` container in `deploy/docker-compose.yml` attaches to (see `deploy/README.md`).
 - The Ollama base URL must be configurable via `OLLAMA_BASE_URL` (default: `http://192.168.1.30:11434`).
 - No `extra_hosts` / `host.docker.internal` — the default Ollama URL points directly to the LAN IP of the Ollama host.
 
@@ -356,7 +356,7 @@ networks:
     driver: bridge
 ```
 
-No database. No volumes. No published ports — access is via a Caddy reverse proxy on `cogito-net` (see `deploy/DEPLOY.md`). Set `ALLOWED_ORIGINS` in a `.env` file alongside docker-compose (copy `.env.example`).
+No database. No volumes. No published ports — access is via a Caddy reverse proxy on `cogito-net` (see `deploy/README.md`). Set `ALLOWED_ORIGINS` in a `.env` file alongside docker-compose (copy `.env.example`).
 
 ---
 

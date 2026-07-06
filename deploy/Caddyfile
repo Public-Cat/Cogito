@@ -1,43 +1,47 @@
-# Cogito vhost blocks — split-horizon realm design.
+# Cogito reverse-proxy config — split-horizon realm design.
 #
-# This is NOT a standalone Caddyfile this repo runs for you. It's a snippet
-# to copy into your OWN existing Caddyfile (the Caddy instance you already
-# run for other services). See deploy/DEPLOY.md section 3 for the full
-# integration steps (sharing a Docker network with this container, etc).
+# Two vhosts, each independently trusted by the app via the X-Cogito-Realm
+# header that THIS file stamps (Caddy's `header_up` with a value is a Set,
+# which replaces any value a client tried to forge — so each block below is
+# sufficient on its own). Do NOT add a `header_up -X-Cogito-Realm` "strip"
+# anywhere: Caddy applies deletes after sets, so it would wipe the value the
+# set just added and every client would fall back to realm=public.
 #
-# Public vhost: fronted by Cloudflare Tunnel, reachable by anyone with the
-# link + the per-session join code (auto-generated, shown to the host). LAN
-# vhost: never tunneled, reachable only from the local network (or the host
-# itself), grants host privileges.
+#   cogito.home.arpa        — LAN only, never tunneled. Grants host privileges.
+#   {$COGITO_PUBLIC_DOMAIN} — public, reached via Cloudflare Tunnel. Gated by
+#                             the app's per-session join code, not by Caddy.
 #
-# Replace cogito.example.com with your real public domain before deploying.
-# `cogito:3000` below resolves once your Caddy container is attached to the
-# `cogito-net` Docker network (defined in docker-compose.yml) — see
-# deploy/DEPLOY.md section 3 for how to connect your Caddy container to it.
+# Run standalone via docker-compose.yml next to this file (local testing or
+# turnkey production), or copy the two site blocks below into a Caddy
+# instance you already run elsewhere for other services — see README.md
+# ("Already running your own Caddy?"). If merging into an existing Caddyfile
+# that already has its own global options `{ ... }` block, drop the one below
+# instead of having two.
 
-# Public — published through Cloudflare Tunnel. Friends reach this.
-cogito.example.com {
-    reverse_proxy cogito:3000 {
-        # SECURITY: `header_up` with a value uses Set, which REPLACES any
-        # X-Cogito-Realm a client tried to send — so this single line already
-        # forces the realm and a forged header can't get through.
-        # Do NOT add `header_up -X-Cogito-Realm` to "strip first": Caddy applies
-        # header deletes AFTER sets, so the delete would remove the value we
-        # just set and the upstream would receive no header at all.
-        header_up X-Cogito-Realm public    # force public realm
-    }
+{
+	# .home.arpa can't get a public ACME cert, so both vhosts use Caddy's
+	# internal CA — cloudflared connects to the public one with TLS
+	# verification disabled, so a self-signed cert there is fine. Don't
+	# auto-redirect :80 -> :443 so a plain curl smoke test still works.
+	auto_https disable_redirects
 }
 
-# LAN only — never in the Cloudflare Tunnel ingress. Host (you) reaches this.
+# LAN — never in the Cloudflare Tunnel ingress. Host reaches this directly.
 cogito.home.arpa {
-    tls internal
-    reverse_proxy cogito:3000 {
-        # Set replaces any client-sent value (see the public block). A
-        # `header_up -X-Cogito-Realm` here would be applied AFTER this set and
-        # strip the header, leaving LAN clients as realm=public with no host
-        # privileges — which is exactly the bug this avoids.
-        header_up X-Cogito-Realm lan       # grants host privileges
-    }
+	tls internal
+	reverse_proxy cogito:3000 {
+		header_up X-Cogito-Realm lan
+	}
+}
+
+# Public — reached only through the cloudflared container on cogito-net.
+# Cloudflare's edge holds the publicly-trusted cert your friends actually
+# see; the `tls internal` cert here is only seen by cloudflared itself.
+{$COGITO_PUBLIC_DOMAIN} {
+	tls internal
+	reverse_proxy cogito:3000 {
+		header_up X-Cogito-Realm public
+	}
 }
 
 # Note: Caddy proxies WebSocket upgrade requests (Socket.IO) automatically

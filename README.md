@@ -51,7 +51,7 @@ docker compose up --build
 ```
 
 The container publishes no host port — access is via a Caddy reverse proxy
-attached to the `cogito-net` Docker network. See `deploy/DEPLOY.md` for the
+attached to the `cogito-net` Docker network. See `deploy/README.md` for the
 full operator runbook.
 
 To let other players join from phones on the same network (dev mode), share:

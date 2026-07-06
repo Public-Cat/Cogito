@@ -4,8 +4,8 @@
 // Loads the real join page through the Caddy LAN vhost (https://cogito.home.arpa,
 // realm = lan) in a headless browser and asserts the code box is not shown. This
 // is the visual counterpart to tests/join.mjs (which only checks the socket layer
-// and can't see the DOM). Requires the local Caddy harness up (deploy/local) and
-// cogito.home.arpa resolving to the Caddy host. Needs chromium:
+// and can't see the DOM). Requires the Caddy container up (see deploy/README.md)
+// and cogito.home.arpa resolving to the Caddy host. Needs chromium:
 //   npx playwright install chromium
 import { chromium } from 'playwright';
 
