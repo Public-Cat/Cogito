@@ -33,7 +33,7 @@ services:
       - COGITO_PUBLIC_DOMAIN=${COGITO_PUBLIC_DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
+      - ./Caddy/data:/data
     restart: unless-stopped
 
   # Reaches Caddy over cogito-net by container name (cogito-caddy:80) — see
@@ -63,6 +63,3 @@ networks:
   cogito-net:
     external: true
     name: cogito-net
-
-volumes:
-  caddy_data:

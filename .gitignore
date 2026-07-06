@@ -5,3 +5,4 @@ node_modules/
 tmp/
 worktrees/
 .claude/settings.local.json
+deploy/Caddy/
