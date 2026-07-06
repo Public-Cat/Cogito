@@ -36,11 +36,6 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: cogito-cloudflared
-    profiles:
-      - tunnel
-    command: tunnel --no-autoupdate run
-    env_file:
-      - .env
     networks:
       - cogito-net
     restart: unless-stopped
