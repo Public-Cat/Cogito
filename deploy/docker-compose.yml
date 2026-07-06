@@ -1,7 +1,7 @@
-# Cogito reverse-proxy stack: Caddy (LAN + public vhosts) and, optionally, a
-# Cloudflare Tunnel container that publishes the public vhost to the internet
-# with no inbound firewall ports opened. Runs alongside the root
-# docker-compose.yml (the app + the cogito-net network) — bring that up first.
+# Cogito reverse-proxy stack: Caddy (LAN + public vhosts) and a Cloudflare
+# Tunnel container that publishes the public vhost to the internet with no
+# inbound firewall ports opened. Runs alongside the root docker-compose.yml
+# (the app + the cogito-net network) — bring that up first.
 #
 # LAN-only (e.g. running tests/join.mjs, no real domain/tunnel yet):
 #   cp deploy/.env.example deploy/.env   # placeholder values are fine for this
@@ -9,10 +9,10 @@
 #
 # Full stack — public + LAN, real deployment or full-stack local testing:
 #   cp deploy/.env.example deploy/.env   # fill in TUNNEL_TOKEN + COGITO_PUBLIC_DOMAIN
-#   docker compose -f deploy/docker-compose.yml --profile tunnel up -d
+#   docker compose -f deploy/docker-compose.yml up -d
 #
 # Tear down:
-#   docker compose -f deploy/docker-compose.yml --profile tunnel down
+#   docker compose -f deploy/docker-compose.yml down
 
 services:
   caddy:
@@ -20,24 +20,41 @@ services:
     container_name: cogito-caddy
     networks:
       - cogito-net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
     ports:
       - "80:80"
       - "443:443"
-    env_file:
-      - .env
+    environment:
+      - COGITO_PUBLIC_DOMAIN=${COGITO_PUBLIC_DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
     restart: unless-stopped
 
-  # Only started with `--profile tunnel`. Reaches Caddy over cogito-net by
-  # container name (cogito-caddy:443) — see README.md for the matching
-  # "Public Hostname" service address to set in the Cloudflare dashboard.
+  # Reaches Caddy over cogito-net by container name (cogito-caddy:80) — see
+  # README.md for the matching "Public Hostname" service address to set in
+  # the Cloudflare dashboard. Only TUNNEL_TOKEN is passed in (not the rest of
+  # .env) so Caddy's COGITO_PUBLIC_DOMAIN never ends up in this container.
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: cogito-cloudflared
     networks:
       - cogito-net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run
     restart: unless-stopped
 
 networks:

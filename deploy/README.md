@@ -20,14 +20,17 @@ LAN ─────────────────────────�
 - **cloudflared container**: makes an outbound connection from your host to
   Cloudflare — no inbound firewall ports are ever opened. Only the public
   domain is routed through it; it reaches Caddy over the internal `cogito-net`
-  Docker network (`cogito-caddy:443`), not through any published port.
-- **caddy container**: terminates TLS for two vhosts (`deploy/Caddyfile`):
-  - `{$COGITO_PUBLIC_DOMAIN}` — public, reached via the tunnel. Treated as the
-    `public` realm. Gated by the app's per-session join code (auto-generated,
-    shown to the host in the lobby) — Caddy doesn't gate this, the app does.
-  - `cogito.home.arpa` — LAN-only, published on the host's `80`/`443` for
-    machines on your LAN, never tunneled. Treated as the `lan` realm, which
-    the app grants host/admin privileges to.
+  Docker network (`cogito-caddy:80`), not through any published port. This hop
+  is plain HTTP — it never leaves the private Docker network, and Cloudflare's
+  edge already terminates the publicly-trusted TLS cert your friends see.
+- **caddy container** (`deploy/Caddyfile`):
+  - `{$COGITO_PUBLIC_DOMAIN}` — public, reached via the tunnel over plain HTTP
+    (see above). Treated as the `public` realm. Gated by the app's
+    per-session join code (auto-generated, shown to the host in the lobby) —
+    Caddy doesn't gate this, the app does.
+  - `cogito.home.arpa` — LAN-only, published on the host's `80`/`443` over
+    HTTPS (Caddy's internal CA) for machines on your LAN, never tunneled.
+    Treated as the `lan` realm, which the app grants host/admin privileges to.
 - **App**: the `cogito` container (root `docker-compose.yml`) still publishes
   no port to the host at all — it's only reachable from whatever else is on
   `cogito-net`, i.e. `cogito-caddy`.
@@ -105,8 +108,11 @@ tab on your tunnel):
 | Field | Value |
 |---|---|
 | Hostname | your real domain, matching `COGITO_PUBLIC_DOMAIN` |
-| Service | `https://cogito-caddy:443` |
-| TLS → No TLS Verify | enabled (Caddy uses an internal CA) |
+| Service | `http://cogito-caddy:80` |
+
+Plain HTTP is fine here: this hop never leaves the private `cogito-net`
+Docker network — Cloudflare's edge already terminates the real, publicly-
+trusted TLS cert your friends see before traffic ever reaches cloudflared.
 
 **4. Add the public domain to `ALLOWED_ORIGINS`** in the root `.env`:
 
@@ -118,7 +124,7 @@ ALLOWED_ORIGINS=https://cogito.home.arpa,https://your.domain.com
 
 ```bash
 docker compose up -d --build                                  # app
-docker compose -f deploy/docker-compose.yml --profile tunnel up -d   # caddy + cloudflared
+docker compose -f deploy/docker-compose.yml up -d             # caddy + cloudflared
 ```
 
 **Verify**:
@@ -136,7 +142,7 @@ docker logs cogito | grep realm
 Tear down:
 
 ```bash
-docker compose -f deploy/docker-compose.yml --profile tunnel down
+docker compose -f deploy/docker-compose.yml down
 docker compose down
 ```
 
@@ -160,9 +166,9 @@ need the `caddy` container here at all. Instead:
    `.../data/caddy/pki/authorities/local/root.crt` in its data volume) and
    import it into your host OS/browser trust store.
 5. You can still run the `cloudflared` container
-   (`docker compose -f deploy/docker-compose.yml --profile tunnel up -d cloudflared`)
+   (`docker compose -f deploy/docker-compose.yml up -d cloudflared`)
    and point its Public Hostname service address at your own Caddy container
-   instead of `cogito-caddy:443`.
+   instead of `cogito-caddy:80`.
 
 ## 5. LAN DNS
 

@@ -19,10 +19,8 @@
 # instead of having two.
 
 {
-	# .home.arpa can't get a public ACME cert, so both vhosts use Caddy's
-	# internal CA — cloudflared connects to the public one with TLS
-	# verification disabled, so a self-signed cert there is fine. Don't
-	# auto-redirect :80 -> :443 so a plain curl smoke test still works.
+	# .home.arpa can't get a public ACME cert, so it uses Caddy's internal CA.
+	# Don't auto-redirect :80 -> :443 so a plain curl smoke test still works.
 	auto_https disable_redirects
 }
 
@@ -34,11 +32,12 @@ cogito.home.arpa {
 	}
 }
 
-# Public — reached only through the cloudflared container on cogito-net.
+# Public — reached only through the cloudflared container on cogito-net,
+# which never leaves the private Docker network, so this hop is plain HTTP.
 # Cloudflare's edge holds the publicly-trusted cert your friends actually
-# see; the `tls internal` cert here is only seen by cloudflared itself.
-{$COGITO_PUBLIC_DOMAIN} {
-	tls internal
+# see and terminates TLS there; nothing between cloudflared and here is
+# ever exposed to the internet.
+http://{$COGITO_PUBLIC_DOMAIN} {
 	reverse_proxy cogito:3000 {
 		header_up X-Cogito-Realm public
 	}
