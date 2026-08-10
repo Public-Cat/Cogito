@@ -1,28 +1,14 @@
 import { io } from "socket.io-client";
+import { resetSession, sleep, waitForState } from "./_utils.mjs";
 
 const BASE = process.env.COGITO_URL || "http://192.168.1.32:3000";
-
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
 
 async function main() {
   console.log("=== Full Game Flow Test: Voting + End ===\n");
   const t = (msg) => console.log("  [" + (Date.now() % 100000) + "] " + msg);
 
-  // 0. Reset any stale session
   t("Resetting stale session...");
-  const resetSocket = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
-  await new Promise(r => resetSocket.on("connect", r));
-  // lobby:reset requires the caller to be a lan host, so join first to
-  // become host of any leftover/empty session before resetting it.
-  await new Promise(r => {
-    resetSocket.emit("lobby:setName", { name: "Resetter" });
-    resetSocket.once("lobby:state", r);
-  });
-  resetSocket.emit("lobby:reset");
-  await sleep(500);
-  resetSocket.disconnect();
+  await resetSession();
 
   // 1. Join as 2 humans
   t("Joining Player A (host)...");
@@ -70,10 +56,6 @@ async function main() {
 
   // Persistent game:ended listener (catches end from any branch)
   sA.on("game:ended", (data) => { endedData = data; });
-
-  function waitForState(socket) {
-    return new Promise(r => socket.once("game:state", r));
-  }
 
   const startTime = Date.now();
   const MAX_DURATION_MS = 300000; // 5 min safety

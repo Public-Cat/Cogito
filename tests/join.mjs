@@ -1,20 +1,5 @@
-// tests/join.mjs — Verifies LAN players can join the game through Caddy.
-//
-// Unlike the other tests (which connect straight to the app on :3000 and fake
-// the realm with an X-Cogito-Realm header), this test goes through the real
-// Caddy LAN vhost at https://cogito.home.arpa. The realm is stamped by Caddy,
-// NOT by the client — so this test deliberately sends no realm header. It
-// proves the deployment path that grants host privileges actually works:
-//   1. A LAN player joins with NO session code and becomes host.
-//   2. A second LAN player joins with NO session code (not host).
-//   3. Only the host sees the per-session sessionCode; tokens are per-player.
-//
-// Requires the stack up: `docker compose up -d` then
-// `docker compose -f deploy/docker-compose.yml up -d`, and
-// cogito.home.arpa resolving to the host running Caddy.
-//
-// Override the URL for local pre-DNS checks, e.g.:
-//   COGITO_URL=https://cogito.home.arpa node tests/join.mjs   (default)
+// Verifies LAN join through Caddy (no X-Cogito-Realm header — Caddy sets it).
+// Requires: docker compose up, cogito.home.arpa resolving to Caddy host.
 import { io } from "socket.io-client";
 
 const BASE = process.env.COGITO_URL || "https://cogito.home.arpa";

@@ -13,10 +13,6 @@ const PORT = process.env.PORT || 3000;
 // Loopback default keeps dev safe; docker-compose and the dev npm script set HOST=0.0.0.0 explicitly.
 const HOST = process.env.HOST || '127.0.0.1';
 
-// CORS allow-list: restrict Socket.IO handshakes to known origins. Override
-// via ALLOWED_ORIGINS (comma-separated) for self-hosted domains/LAN names.
-// If ALLOWED_ORIGINS is set but contains only empty/whitespace values after
-// parsing, we warn loudly rather than silently producing [''] which rejects all.
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean)
   : ['https://cogito.example.com', 'https://cogito.home.arpa'];
@@ -54,13 +50,9 @@ app.get('/api/topics', (_req, res) => {
 });
 
 io.on('connection', (socket) => {
-  // Realm stamping: only a reverse proxy on the LAN is trusted to set this
-  // header, so default to 'public' (fail safe) when it's absent or wrong.
+    // Only a trusted reverse proxy sets this header; default 'public' (fail safe).
   socket.data.realm = socket.handshake.headers['x-cogito-realm'] === 'lan' ? 'lan' : 'public';
   console.log(`Socket connected: ${socket.id} (realm: ${socket.data.realm})`);
-  // Tell the client its realm so the join UI can hide the session-code field
-  // for LAN players (they bypass the code gate). Not sensitive — the server
-  // still enforces realm; this only drives presentation.
   socket.emit('client:hello', { realm: socket.data.realm });
   registerHandlers(io, socket);
 });

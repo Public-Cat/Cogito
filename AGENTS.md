@@ -2,11 +2,10 @@
 
 ## Workflow
 - **Never leave workspace root.** Use `./tmp` for temp files (already gitignored).
-- **All features branch from `develop`** and merge back to `develop`. Never touch `main`.
-- Use git worktrees for parallel features:
-  `git worktree add -b <branch-name> ./worktrees/<branch-name> develop`
+- **Branch from `develop`**, merge back to `develop`. Never touch `main`.
+- Git worktrees for parallel features: `git worktree add -b <name> ./worktrees/<name> develop`
 - `worktrees/` is in `.gitignore`.
-- When finished, fetch/rebase, merge back to `develop`, delete branch.
+- Fetch/rebase, merge to `develop`, delete branch when done.
 - **Conventional Commits** (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`).
 
 ## Stack
@@ -31,14 +30,14 @@
 | `node tests/win-condition.mjs` | Unit test — no server/Ollama needed, runs GameSession directly |
 | `docker compose up --build` | Production build + run |
 
-All tests are plain Node scripts (no framework), exit via `process.exit(0|1)`. No lint/typecheck/build scripts exist. Don't run tests concurrently — single in-memory session leaves stale state.
+All tests are plain Node scripts, exit via `process.exit(0|1)`. Don't run concurrently — single in-memory session leaves stale state.
 
 ## Test prerequisites
 - Server running at `PORT` (default `3000`).
 - Ollama at `OLLAMA_BASE_URL` (default `http://192.168.1.30:11434`) with `qwen2.5:7b` pulled.
 - `npm install` (devDeps: `playwright`, `socket.io-client`).
-- Playwright UI tests also need `npx playwright install chromium` for browser binary.
-- Server session is dirty after each test; clean up with `lobby:reset` or `game:returnToLobby`.
+- Playwright UI tests also need `npx playwright install chromium`.
+- Session is dirty after each test; clean up with `lobby:reset` or `game:returnToLobby`.
 - Tests connect to `http://192.168.1.32:3000` (dev server port 3000, not Docker port 3008).
 
 ## Game state machine
@@ -49,58 +48,60 @@ Minimum **2 humans + 1 AI** to start. Voting starts round ≥ 2, then every roun
 ## Key files
 | File | Role |
 |---|---|
-| `server/index.js` | Express app, Socket.IO init, static files, `/api/models`, `/api/rules`, `/api/topics` |
+| `server/index.js` | Express, Socket.IO, static files, `/api/models`, `/api/rules`, `/api/topics` |
 | `server/game/GameManager.js` | Singleton — `getOrCreateSession()`, `reset()`, `generatePlayerId()` |
-| `server/game/GameSession.js` | State machine, submit/reveal phases, combined AI+human vote resolution, win conditions |
+| `server/game/GameSession.js` | State machine, phase transitions, vote resolution, win conditions |
 | `server/game/Player.js` | Player model (`isHuman`, `isEliminated`, `isDisconnected`, `messageHistory[]`, `model`, `currentVote`) |
 | `server/game/topics.js` | ~15 discussion topics |
-| `server/ollama/prompts.js` | All AI prompts — never inline |
+| `server/ollama/prompts.js` | All AI prompts — do not inline prompt strings elsewhere |
 | `server/ollama/OllamaClient.js` | HTTP wrapper for Ollama `/api/chat` and `/api/tags` |
 | `server/socket/handlers.js` | All Socket.IO event handlers |
-| `client/js/lobby.js` | Lobby screen logic |
-| `client/js/game.js` | In-game screen logic |
+| `client/js/lobby.js` | Lobby screen |
+| `client/js/game.js` | In-game screen |
 | `client/js/matrixRain.js` | Canvas rain background |
-| `client/js/sfx.js` | Programmatic sound effects (Web Audio API) |
+| `client/js/sfx.js` | Web Audio API sound effects |
 
 ## Key conventions
-- **Validation**: Names `/^[a-zA-Z0-9 ]{1,20}$/`, messages ≤500 chars, both HTML-sanitized (`<>&"'` stripped). All handlers wrapped in try/catch.
+- **Validation**: Names `/^[a-zA-Z0-9 ]{1,20}$/`, messages ≤500 chars, sanitized (`<>&"'` stripped). All handlers wrapped in try/catch.
 - **Game state** lives only in `GameSession.js` — never in socket handlers.
-- **`emitToAll` / `emitToSocket`** must be set by `lobby:start` handler *before* calling `startGame()`. `startSubmitPhase()` → `emitGameState()` needs them. Crashes if unset.
-- **AI disconnect asymmetry**: `getActiveAIs()` filters only by `isEliminated` — disconnected AIs still generate messages and vote. Only humans lose active status on disconnect (`getActivePlayers()` checks `isDisconnected`).
-- **AI vote parsing**: Ranking responses split on `[,;\n]`, then fuzzy case-insensitive `includes()` match against player names (longest-first), deduplicated. Unparseable = empty ranking (zero points).
-- **Vote resolution**: Combined AI+human Borda count. Each AI ranks all other players from most suspicious to least (points: first = N-1, ..., last = 0). Each active, non-disconnected human casts a single vote for one other player (self-votes rejected server-side) — counted as a full N-1 "first place" pick, same weight as an AI's top choice. All points sum into one score per player; highest total eliminated. Tiebreaker: among tied players, the one ranked/voted highest (earliest) in more individual AI rankings or human votes wins. 3rd-level: cumulative Borda history across all prior voting rounds breaks remaining ties. 4th-level (final, guarantees progress): random pick among the still-tied leaders — without it, a symmetric standoff (e.g. 1-human-vs-1-AI) would tie identically forever. Disconnected humans don't vote (humans have no input device while offline, unlike autonomous AIs).
-- **Human vote casting**: `game:castVote { targetId }` → `GameSession.castHumanVote(player, targetId)`. Rejects votes outside VOTING phase, from eliminated/disconnected players, self-votes, or invalid/eliminated targets. Early resolve via `tryResolveRankings()` when both AI rankings are done AND all active humans have voted; otherwise the full 40s `voteTimeout` fires.
-- **AI memory**: `messageHistory[]` per AI (system prompt + turn prompts + round transcripts of others' messages).
-- **AI personality**: Each AI gets a random `personality` from `PERSONALITIES` array (`skeptical`, `enthusiastic`, `thoughtful`, `dry`, `curious`, `anxious`) — injected into `buildSystemPrompt()` to temper tone.
-- **AI name generation**: Via `buildNamePrompt()`, retries on duplicates (up to 10 tries), fallback `AI-xxxx`.
-- **Client rejoin**: lobby.js stores `cogito_myId` in localStorage, both pages emit `game:rejoin` on load. Either can win depending on page load order.
-- **Disconnect handler** emits `host:assigned` to host even during in-game disconnect (handlers.js:361-363), but `GameSession.handleDisconnect()` never reassigns host outside lobby — this event is a harmless no-op mid-game.
+- **`emitToAll` / `emitToSocket`** must be set by `lobby:start` handler *before* `startGame()`. Crashes if unset.
+- **AI disconnect asymmetry**: `getActiveAIs()` filters only by `isEliminated` — disconnected AIs still generate and vote. `getActivePlayers()` checks `isDisconnected`, so only humans lose active status on disconnect.
+- **AI vote parsing**: Split on `[,;\n]`, fuzzy `includes()` match against player names (longest-first with `\b` word boundaries), deduplicated. Unparseable = empty ranking (zero points).
+- **Vote resolution**: Combined AI+human Borda count. AI ranks players most→least suspicious (first = N-2 points, last = 0). Humans cast single vote = full N-2 weight. Highest total eliminated. Tiebreakers: (1) highest-rank count across individual rankings/votes, (2) cumulative Borda history across all prior voting rounds. If still tied → no elimination. Disconnected humans don't vote.
+- **Human vote casting**: `game:castVote { targetId }` → `GameSession.castHumanVote()`. Rejects outside VOTING, eliminated/disconnected/self/invalid targets. Early resolve when AIs done AND all active humans voted; otherwise 40s `voteTimeout` fires.
+- **AI memory**: `messageHistory[]` per AI (system prompt + turn prompts + round transcripts).
+- **AI personality**: Random `personality` from `PERSONALITIES` injected into `buildSystemPrompt()`.
+- **AI name generation**: `buildNamePrompt()`, retries on duplicates (10 tries), fallback `AI-xxxx`.
+- **Client rejoin**: `cogito_myId` + `cogito_myToken_<id>` in localStorage. Both pages emit `game:rejoin` on load.
+- **Disconnect handler**: `GameSession.handleDisconnect()` only reassigns host in LOBBY. `host:assigned` emitted mid-game too but is a harmless no-op.
 
 ## Socket events
-**Client→Server**: `lobby:setName` (`{ name, code }`), `lobby:start` (callback), `game:sendMessage`, `game:castVote`, `game:returnToLobby`, `lobby:reset`, `game:rejoin` (`{ playerId, token }`)
+**Client→Server**: `lobby:setName { name, code }`, `lobby:start (callback)`, `game:sendMessage`, `game:castVote`, `game:returnToLobby`, `lobby:reset`, `game:rejoin { playerId, token }`
 
-**Server→Client**: `client:hello` (`{ realm }`, emitted once on connect in `index.js` before handlers register; the join UI hides the session-code field when `realm === 'lan'`), `lobby:state` (+ per-recipient `myToken`; + host-only `sessionCode`), `host:assigned`, `game:state` (+ per-player `myId`, `myToken`, `submittedBy[]`, `activePlayerCount`), `game:newMessage` (batched at REVEALING start), `game:votingSoon`, `game:voteStart`, `game:voteProgress` (`votedCount`/`totalEligible`, after each human vote), `game:voteResult`, `game:ended`, `error`
+**Server→Client**: `client:hello { realm }`, `lobby:state` (+ per-recipient `myToken`, host-only `sessionCode`), `host:assigned`, `game:state` (+ per-player `myId`, `myToken`, `submittedBy[]`, `activePlayerCount`), `game:newMessage`, `game:votingSoon`, `game:voteStart`, `game:voteProgress { votedCount, totalEligible }`, `game:voteResult`, `game:ended`, `error`
 
-Full `game:state` emitted after every state transition. `game:ended.players` includes `model` for each AI. `myToken` (the per-player `rejoinToken`) is sent ONLY to its owning socket — never broadcast or attached to other players' entries. Likewise `sessionCode` on `lobby:state` is sent ONLY to the host's socket.
+Full `game:state` emits after every state transition. `game:ended.players` includes `model` for each AI. `myToken` and `sessionCode` are scoped to their owning socket only.
 
-**Reset distinction**: both `lobby:reset` and `game:returnToLobby` call `gameManager.reset()` and broadcast an empty `lobby:state` to ALL connected sockets (so no one is stranded on a defunct end screen); `game:returnToLobby` then sends a second `lobby:state` with `isHost: true` to the caller only. **Both require a LAN-realm host** (`requireLanHost()`); a public-realm or non-host socket is rejected with `error`. (`lobby:start` also gates on `requireLanHost()`.)
+**Privileged events** (`lobby:reset`, `game:returnToLobby`, `lobby:start`): gated by `requireLanHost()` — only LAN-realm hosts. Both reset events call `gameManager.reset()`, broadcast empty `lobby:state` to all; `game:returnToLobby` then sends `isHost:true` to the caller.
 
 ## Security / access control
-Built for public hosting via **Cloudflare Tunnel → Caddy → app**. See `deploy/README.md`, `deploy/Caddyfile`, `deploy/docker-compose.yml`.
-- **Realm**: `server/index.js` sets `socket.data.realm` from the `X-Cogito-Realm` header (`'lan'` only if exactly `lan`, else `'public'` — fail safe). Caddy sets this header per vhost with a single `header_up X-Cogito-Realm <realm>` (Set replaces any client-forged value; a `-X-Cogito-Realm` strip would be applied *after* the set and wipe the realm — don't add it); `cogito` itself publishes no host port and is only reachable from the `cogito-net` Docker network — the `caddy` container in `deploy/docker-compose.yml` is what's attached to it (or, if you run your own Caddy elsewhere, you connect it instead — see `deploy/README.md` section 4), which is what makes the header trustworthy. Only `lan` humans can become host (`assignHost()` filters by realm).
-- **Join gate**: per-session join code, auto-generated in the `GameSession` constructor (6 chars, `A-Z`+`2-9` minus ambiguous `O/0/I/1/L`). Public-realm `lobby:setName` must send a matching `code` against the *existing* session — so a public player can't create a session, and there's nothing to join until a LAN host has joined (LAN bypasses the check and is what creates the session). The code is sent only to the host (host-only `sessionCode` on `lobby:state`) and regenerated on every reset / return-to-lobby. No env var.
-- **Identity**: `generatePlayerId()` = random UUID; per-player `rejoinToken`; `game:rejoin` verifies `{ playerId, token }`.
-- **Limits**: CORS `ALLOWED_ORIGINS`; `lobby:start` validates models vs cached Ollama list (skipped if cache empty), caps AI at `MAX_AI_PLAYERS=8`, sanitizes/caps `topic` (≤120); `promisePool` caps Ollama concurrency at 4; per-socket rate limits on `lobby:setName`, `game:sendMessage`, `game:castVote`, `game:rejoin`.
-- **Tests**: host client must connect with `extraHeaders: { 'X-Cogito-Realm': 'lan' }`; `tests/security.mjs` covers the access-control surface.
+Built for **Cloudflare Tunnel → Caddy → app**. See `deploy/README.md`.
+- **Realm**: `X-Cogito-Realm` header set by Caddy per vhost. Only `'lan'` grants host privileges; default `'public'` (fail safe). `cogito` publishes no host port — accessible only via the `cogito-net` Docker network, making the header trustworthy.
+- **Join gate**: Auto-generated 6-char session code (`A-Z`+`2-9` minus `O/0/I/1/L`). LAN bypasses; public realm must match. Code sent only to host, regenerated on every reset.
+- **Identity**: `randomUUID()` player IDs; per-player `rejoinToken`; `game:rejoin` verifies `{ playerId, token }`.
+- **Limits**: CORS `ALLOWED_ORIGINS`; `MAX_AI_PLAYERS=8`; `MAX_HUMAN_PLAYERS=12`; topic ≤120 chars; Ollama concurrency capped at 4; per-socket rate limits on join, message, vote, rejoin events.
+- **Tests**: host client uses `extraHeaders: { 'X-Cogito-Realm': 'lan' }`; `tests/security.mjs` covers access-control surface.
 
 ## Ollama
-- Default URL configurable via `OLLAMA_BASE_URL`. Model list polled every 30s, cached. Timeouts: chat 105s, model list 5s.
+- URL via `OLLAMA_BASE_URL`. Model list polled every 30s, cached. Timeouts: chat 105s, list 5s.
 - On failure, returns `"..."` — does not crash.
 
 ## Docker
-- `node:20-alpine`, `npm ci --omit=dev`, runs as non-root (`USER node`). Service `cogito` publishes no host port; reachable only via the `cogito-net` Docker network, which the `caddy` container in `deploy/docker-compose.yml` attaches to (see `deploy/README.md`) — `read_only: true` + `tmpfs: /tmp`, `cap_drop: ALL`, `no-new-privileges:true`, `restart: unless-stopped`.
-- Env: `HOST=0.0.0.0` (listen on the container interface; isolation comes from having no published port and being on `cogito-net`, not from HOST), plus `ALLOWED_ORIGINS`, `OLLAMA_BASE_URL`. Set real values before deploying (see `deploy/README.md`). (The join code is auto-generated per session — no env var.)
-- `.dockerignore` excludes `*.md` but preserves `!RULES.md` — `RULES.md` is included in the image to serve via `GET /api/rules`.
+- `node:20-alpine`, `npm ci --omit=dev`, runs as non-root (`USER node`).
+- No published host port; reachable via `cogito-net` Docker network only.
+- `read_only: true`, `tmpfs: /tmp`, `cap_drop: ALL`, `no-new-privileges:true`, `restart: unless-stopped`.
+- Env: `HOST=0.0.0.0`, `ALLOWED_ORIGINS`, `OLLAMA_BASE_URL`.
+- `.dockerignore` excludes `*.md` but preserves `!RULES.md`.
 
 ## Historical bugs (don't reintroduce)
 | Bug | Fix |
@@ -111,4 +112,4 @@ Built for public hosting via **Cloudflare Tunnel → Caddy → app**. See `deplo
 | `game:rejoin` only emitted to rejoining socket | Must call `session.emitGameState()` which sends to all players |
 | Shared localStorage `myId` → multi-tab collision | Key is `cogito_myId`, emitted per-player via `game:state.myId` |
 | Borda single-player ranking gave 0 points (N-1 where N=1) | Edge case: ranking only 1 player → give 1 point |
-| Borda ties stalled games with even AI splits | Add cumulative Borda history as 3rd-level tiebreaker |
+| Borda ties stalled games with even AI splits | Add cumulative Borda history as 2nd-level tiebreaker |

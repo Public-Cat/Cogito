@@ -1,32 +1,15 @@
 import { io } from "socket.io-client";
+import { resetSession, sleep, waitForState } from "./_utils.mjs";
 
 const BASE = process.env.COGITO_URL || "http://192.168.1.32:3000";
-
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
 
 async function main() {
   console.log("=== Disconnect/Reconnect Edge Case Tests ===\n");
   const t = (msg) => console.log("  [" + (Date.now() % 100000) + "] " + msg);
 
-  function waitForState(socket) {
-    return new Promise(r => socket.once("game:state", r));
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // SCENARIO 1: Lobby disconnect → host reassignment
-  // ─────────────────────────────────────────────────────────────
+  // Scenario 1: Lobby disconnect → host reassignment
   console.log("--- Scenario 1: Lobby host disconnect → reassignment ---\n");
-
-  const resetSock = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
-  await new Promise(r => resetSock.on("connect", r));
-  // lobby:reset requires the caller to be a lan host, so join first to
-  // become host of any leftover/empty session before resetting it.
-  await new Promise(r => { resetSock.emit("lobby:setName", { name: "Resetter" }); resetSock.once("lobby:state", r); });
-  resetSock.emit("lobby:reset");
-  await sleep(300);
-  resetSock.disconnect();
+  await resetSession();
 
   const s1 = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
   await new Promise(r => s1.on("connect", r));
@@ -56,17 +39,10 @@ async function main() {
   await sleep(300);
   s2.disconnect();
 
-  // ─────────────────────────────────────────────────────────────
-  // SCENARIO 2: Mid-game disconnect → remaining players continue
-  // ─────────────────────────────────────────────────────────────
+  // Scenario 2: Mid-game disconnect during SUBMITTING
   console.log("--- Scenario 2: Mid-game disconnect during SUBMITTING ---\n");
 
-  const r2 = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
-  await new Promise(r => r2.on("connect", r));
-  await new Promise(r => { r2.emit("lobby:setName", { name: "Resetter" }); r2.once("lobby:state", r); });
-  r2.emit("lobby:reset");
-  await sleep(300);
-  r2.disconnect();
+  await resetSession();
 
   // Join 3 humans
   const pA = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
@@ -117,8 +93,7 @@ async function main() {
   t("Alice is listed as disconnected: " + aliceInPlayers.isDisconnected);
   console.log("  PASS: Game continues after mid-game disconnect\n");
 
-  // Cleanup scenario 2 — host (Alice) never gets reassigned mid-game by design,
-  // so rejoin as Alice (the only one authorized for game:returnToLobby) to reset.
+  // Rejoin as Alice to reset (host is never reassigned mid-game).
   const pAReconnect = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
   await new Promise(r => pAReconnect.on("connect", r));
   await new Promise(r => {
@@ -133,19 +108,10 @@ async function main() {
   pB.disconnect();
   pC.disconnect();
 
-  // ─────────────────────────────────────────────────────────────
-  // SCENARIO 3: AI disconnect asymmetry — disconnected AI
-  // still generates messages (AI has no socket, so this tests
-  // that getActiveAIs() doesn't filter by isDisconnected)
-  // ─────────────────────────────────────────────────────────────
+  // Scenario 3: AI disconnect asymmetry (getActiveAIs ignores isDisconnected)
   console.log("--- Scenario 3: AI disconnect behavior ---\n");
 
-  const r3 = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
-  await new Promise(r => r3.on("connect", r));
-  await new Promise(r => { r3.emit("lobby:setName", { name: "Resetter" }); r3.once("lobby:state", r); });
-  r3.emit("lobby:reset");
-  await sleep(300);
-  r3.disconnect();
+  await resetSession();
 
   const qA = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
   await new Promise(r => qA.on("connect", r));

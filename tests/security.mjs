@@ -1,33 +1,17 @@
 import { io } from "socket.io-client";
+import { resetSession, sleep } from "./_utils.mjs";
 
 const BASE = "http://192.168.1.32:3000";
 const LAN_HEADERS = { extraHeaders: { "X-Cogito-Realm": "lan" } };
-
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
 
 async function main() {
   console.log("=== Security Hardening Tests ===\n");
   const t = (msg) => console.log("  [" + (Date.now() % 100000) + "] " + msg);
 
-  // 0. Reset any stale session (lan host required to reset)
   t("Resetting stale session...");
-  const resetSocket = io(BASE, LAN_HEADERS);
-  await new Promise(r => resetSocket.on("connect", r));
-  // No host exists yet pre-join, so lobby:reset with no player is a no-op/rejected — that's fine,
-  // we just need gameManager cleared from a previous run. Join+reset properly instead:
-  await new Promise(r => {
-    resetSocket.emit("lobby:setName", { name: "Resetter" });
-    resetSocket.once("lobby:state", r);
-  });
-  resetSocket.emit("lobby:reset");
-  await sleep(300);
-  resetSocket.disconnect();
+  await resetSession();
 
-  // ─────────────────────────────────────────────────────────────
-  // SCENARIO 1: Non-host / non-lan cannot lobby:reset or game:returnToLobby
-  // ─────────────────────────────────────────────────────────────
+  // Scenario 1: Privileged event authorization
   console.log("--- Scenario 1: Privileged event authorization ---\n");
 
   const hostSock = io(BASE, LAN_HEADERS);
@@ -80,9 +64,7 @@ async function main() {
 
   console.log("  PASS: Privileged events gated to lan host\n");
 
-  // ─────────────────────────────────────────────────────────────
-  // SCENARIO 2: lobby:start validation — unknown model, too many AIs
-  // ─────────────────────────────────────────────────────────────
+  // Scenario 2: lobby:start AI validation
   console.log("--- Scenario 2: lobby:start AI validation ---\n");
 
   // Need 2 humans for lobby:start to get past the human-count check.
@@ -130,17 +112,10 @@ async function main() {
   publicSock.disconnect();
   humanSock2.disconnect();
 
-  // ─────────────────────────────────────────────────────────────
-  // SCENARIO 3: game:rejoin token verification
-  // ─────────────────────────────────────────────────────────────
+  // Scenario 3: game:rejoin token verification
   console.log("--- Scenario 3: game:rejoin token verification ---\n");
 
-  const r3reset = io(BASE, LAN_HEADERS);
-  await new Promise(r => r3reset.on("connect", r));
-  await new Promise(r => { r3reset.emit("lobby:setName", { name: "Reset3" }); r3reset.once("lobby:state", r); });
-  r3reset.emit("lobby:reset");
-  await sleep(300);
-  r3reset.disconnect();
+  await resetSession();
 
   const tA = io(BASE, LAN_HEADERS);
   await new Promise(r => tA.on("connect", r));
@@ -202,12 +177,8 @@ async function main() {
   tA2.disconnect();
   tB.disconnect();
 
-  // ─────────────────────────────────────────────────────────────
-  // SCENARIO 4: Auto-generated session code gate
-  // ─────────────────────────────────────────────────────────────
+  // Scenario 4: Session code gate
   console.log("--- Scenario 4: Session code gate ---\n");
-  // Scenario 3 ended with game:returnToLobby, which nulls the session — so no
-  // session exists yet. The code is generated when the LAN host creates one.
 
   // 4a: public join before any session exists → rejected (no code can be right)
   const s4noSession = io(BASE);

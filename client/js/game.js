@@ -4,8 +4,6 @@ const socket = io();
 
 const urlParams = new URLSearchParams(window.location.search);
 let myId = urlParams.get('myId') || localStorage.getItem('cogito_myId') || null;
-// Token is keyed by id so two tabs in one browser don't clobber each other's
-// secret (myId arrives per-tab via the URL param; see multi-tab collision bug).
 let myToken = myId ? localStorage.getItem('cogito_myToken_' + myId) : null;
 let gameState = null;
 const SUBMIT_PHASE_SECONDS = 120;
@@ -423,16 +421,13 @@ socket.on('game:state', (state) => {
     stopCountdowns();
     startRevealCountdown();
   } else if (state.phase === 'VOTING_SOON') {
-    // Leave voteSoonInterval running — game:votingSoon already started it.
     if (submitCountdownInterval) { clearInterval(submitCountdownInterval); submitCountdownInterval = null; }
     if (revealCountdownInterval) { clearInterval(revealCountdownInterval); revealCountdownInterval = null; }
   } else {
     stopCountdowns();
   }
 
-  // Rejoining after the game already ended (e.g. a page refresh) only
-  // replays game:state, never the one-shot game:ended event, so the end
-  // screen must be reconstructed from the persisted endResult here too.
+  // Replay end screen on rejoin (game:ended is only emitted once).
   if (state.phase === 'ENDED' && state.endResult) {
     showEndScreen(state.endResult);
   }

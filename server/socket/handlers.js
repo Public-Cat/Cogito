@@ -1,4 +1,3 @@
-// Socket.IO event handlers — all game and lobby interactions flow through here.
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import gameManager from '../game/GameManager.js';
 import { getCachedModels } from '../ollama/OllamaClient.js';
@@ -17,32 +16,10 @@ function sanitize(str) {
   return str.replace(/[<>&"']/g, '');
 }
 
-// ---- Lightweight rate limiting (no deps) ----
-// Map<clientKey, Map<eventName, number[]>> — timestamps (ms) of recent hits.
-// Two keying strategies (see registerHandlers):
-//   - Pre-join actions (lobby:setName, game:rejoin) key by client IP so a
-//     reconnect can't reset the counter — this is the join/token brute-force
-//     surface. NOTE: behind a reverse proxy, socket.handshake.address is the
-//     PROXY's IP, so these limits are shared across all proxied clients until
-//     the real client IP is sourced from a trusted X-Forwarded-For header.
-//   - In-game actions (game:sendMessage, game:castVote) key by the joined
-//     player's id: stable across reconnects (reclaiming an id needs the rejoin
-//     token) and, crucially, not collapsed when many players share one
-//     proxy/NAT IP (which would otherwise let one player's message exhaust the
-//     shared 1/s allowance for everyone).
-// Buckets are never cleared on disconnect; a periodic sweep removes stale
-// entries to bound memory growth.
+// Fixed-window rate limiter. Pre-join actions key by client IP; in-game actions
+// key by player id so multiple players behind one NAT don't share a bucket.
 const rateBuckets = new Map();
 
-/**
- * Token-bucket-ish fixed-window limiter: allow at most `max` calls of
- * `event` per `windowMs` for a given client key. Returns true if allowed.
- * @param {string} key - Client identity key (IP address or socket.id fallback).
- * @param {string} event
- * @param {number} max
- * @param {number} windowMs
- * @returns {boolean}
- */
 function allowRate(key, event, max, windowMs) {
   let perClient = rateBuckets.get(key);
   if (!perClient) {
@@ -60,8 +37,6 @@ function allowRate(key, event, max, windowMs) {
   return true;
 }
 
-// Periodically prune rate-bucket entries that have had no recent activity.
-// Windows are at most 10 s; 60 s is a safe cleanup threshold.
 setInterval(() => {
   const cutoff = Date.now() - 60_000;
   for (const [key, perClient] of rateBuckets) {
@@ -70,17 +45,8 @@ setInterval(() => {
   }
 }, 5 * 60_000).unref();
 
-/**
- * Best-effort real client IP for rate-limiting behind a reverse proxy.
- * Caddy appends the connecting peer's IP to X-Forwarded-For, so the rightmost
- * entry is the address our trusted proxy actually saw (a client can prepend
- * forged hops but cannot control the one Caddy adds). Falls back to the direct
- * socket address when there's no proxy header.
- * NOTE: for public traffic arriving via Cloudflare Tunnel the rightmost hop is
- * cloudflared; use CF-Connecting-IP there if you want per-client granularity.
- * @param {object} socket - Socket.IO socket.
- * @returns {string}
- */
+// Rightmost X-Forwarded-For hop (trusted: set by Caddy). Falls back to socket address.
+// Note: behind Cloudflare Tunnel, use CF-Connecting-IP for per-client IP.
 function clientIp(socket) {
   const xff = socket.handshake.headers['x-forwarded-for'];
   if (typeof xff === 'string' && xff.length) {
@@ -90,22 +56,12 @@ function clientIp(socket) {
   return socket.handshake.address || socket.id;
 }
 
-/**
- * Constant-time string equality using crypto.timingSafeEqual.
- * Returns false when either argument is not a string or lengths differ.
- * @param {*} a
- * @param {*} b
- * @returns {boolean}
- */
+// Constant-time comparison — prevents timing attacks on session codes / rejoin tokens.
 function safeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-/**
- * Gate a privileged action to the lobby host on the trusted LAN realm.
- * Emits 'error' and returns false if the caller doesn't qualify.
- */
 function requireLanHost(session, socket) {
   const player = session.getPlayerBySocket(socket.id);
   if (!player || !player.isHost || socket.data.realm !== 'lan') {
@@ -115,15 +71,6 @@ function requireLanHost(session, socket) {
   return true;
 }
 
-/**
- * Build the per-recipient lobby:state payload for a single player.
- * Scopes myToken and sessionCode to the owning player only — these are
- * never broadcast to other players.
- * @param {object} session - The current GameSession.
- * @param {object} player - The recipient Player.
- * @param {string[]} models - Cached Ollama model list.
- * @returns {object}
- */
 function lobbyStateFor(session, player, models) {
   const base = session.getLobbyState();
   const host = session.getHost();
@@ -139,14 +86,7 @@ function lobbyStateFor(session, player, models) {
 }
 
 export function registerHandlers(io, socket) {
-  // Pre-join actions key by real client IP (via X-Forwarded-For behind the
-  // proxy) so a reconnect doesn't reset the counter. Limits here are generous
-  // enough to tolerate a whole household/LAN party joining from one IP while
-  // still throttling join-code / token brute-force.
   const rateKey = clientIp(socket);
-  // In-game actions key by the joined player's stable id (falls back to the IP
-  // key before the socket has joined). Prevents many players behind one proxy/
-  // NAT IP from sharing — and exhausting — a single per-action bucket.
   const playerRateKey = () =>
     gameManager.getSession()?.getPlayerBySocket(socket.id)?.id || rateKey;
 
@@ -354,11 +294,8 @@ export function registerHandlers(io, socket) {
       const session = gameManager.getSession();
       if (!session || !requireLanHost(session, socket)) return;
       gameManager.reset();
-      io.emit('lobby:state', {
-        players: [],
-        models: [],
-        isHost: false,
-      });
+      const empty = { players: [], models: [], isHost: false };
+      io.emit('lobby:state', empty);
     } catch (err) {
       console.error('lobby:reset error:', err);
     }
@@ -369,20 +306,9 @@ export function registerHandlers(io, socket) {
       const session = gameManager.getSession();
       if (!session || !requireLanHost(session, socket)) return;
       gameManager.reset();
-      // The host ending the game wipes the single shared session. Notify every
-      // socket so all players return to the lobby instead of being stranded on
-      // a now-defunct end screen (guests can no longer self-trigger this, since
-      // it's LAN-host gated). The caller gets isHost:true as the returning host.
-      io.emit('lobby:state', {
-        players: [],
-        models: [],
-        isHost: false,
-      });
-      socket.emit('lobby:state', {
-        players: [],
-        models: [],
-        isHost: true,
-      });
+      const empty = { players: [], models: [], isHost: false };
+      io.emit('lobby:state', empty);
+      socket.emit('lobby:state', { ...empty, isHost: true });
     } catch (err) {
       console.error('game:returnToLobby error:', err);
     }
@@ -431,9 +357,6 @@ export function registerHandlers(io, socket) {
           if (host && host.socketId) {
             io.to(host.socketId).emit('host:assigned');
           }
-          // Push updated disconnect status to all clients immediately so they
-          // don't wait until the next phase transition to see the [DISCONNECTED]
-          // marker and updated vote-eligibility counts.
           currentSession.emitGameState();
         }
       }

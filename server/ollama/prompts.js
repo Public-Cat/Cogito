@@ -1,13 +1,3 @@
-// All AI prompt builders — do not inline prompt strings elsewhere.
-
-/**
- * Build the system prompt sent once per AI at game start.
- * @param {string} playerName - The AI's chosen display name.
- * @param {string} topic - The current discussion topic.
- * @param {string[]} allPlayerNames - Names of all players in the game (human + AI).
- * @param {string|null} [personalityTrait=null] - One-word personality modifier from the PERSONALITIES
- *   array (e.g. 'skeptical', 'enthusiastic'). Injected as a tone hint; null = no personality line.
- */
 export function buildSystemPrompt(playerName, topic, allPlayerNames, personalityTrait = null) {
   const others = allPlayerNames.filter(n => n !== playerName);
 
@@ -31,14 +21,6 @@ ${personalityLine}Your style:
 `;
 }
 
-/**
- * Build the per-turn prompt sent to an AI during the SUBMITTING phase.
- * @param {object|null} eliminationInfo - last round's elimination outcome (name, isHuman, remaining counts)
- * @param {string|null} discussionHint - one-line salience cue derived from last round's messages
- *   (e.g. "Alice suspects Sophia is the human"). Steers the AI onto the live thread.
- * @param {boolean} isFirstTurn - true for the opening round, when no one has spoken yet, so the
- *   AI must respond to the topic itself rather than reacting to (nonexistent) prior messages.
- */
 export function buildTurnPrompt(eliminationInfo = null, discussionHint = null, isFirstTurn = false) {
   if (isFirstTurn) {
     return `The chat is just starting and no one has spoken yet — you're opening the conversation. Share your take on the topic in ONE short sentence. Don't reference other players or reply to anyone; there's nothing to react to yet. Keep it short and natural — humans are watching for slip-ups.`;
@@ -81,10 +63,6 @@ ${eliminationNote}Players: ${activePlayerNames.join(', ')}
 Reply with a comma-separated list ordered from most suspicious to least suspicious.`;
 }
 
-/**
- * One-shot prompt for AI name generation before game start.
- * No system prompt needed — this is a standalone call.
- */
 export function buildNamePrompt() {
   return `Give me a realistic common human first name. Examples: Sarah, Marcus, Yuki, Amina, Diego. Just the name, nothing else.`;
 }

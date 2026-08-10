@@ -112,9 +112,6 @@ function render() {
   });
 }
 
-// Show or hide the session-code field based on the client's realm. Safe to call
-// before render() (no-op if the field isn't in the DOM yet) and again after the
-// client:hello event arrives, so it works regardless of event/render ordering.
 function applyRealmToJoinPanel() {
   const codeField = document.getElementById('codeField');
   if (codeField) codeField.style.display = codeRequired ? 'block' : 'none';
@@ -160,8 +157,6 @@ async function showLobby(state) {
 }
 
 async function setupHostPanel(state) {
-  // Show the host the join code and wire a clipboard copy. Use .onclick (not
-  // addEventListener) so repeated lobby:state calls don't stack listeners.
   if (state.sessionCode) {
     document.getElementById('sessionCodeText').textContent = state.sessionCode;
     const copyBtn = document.getElementById('copyCodeBtn');
@@ -176,7 +171,6 @@ async function setupHostPanel(state) {
     };
   }
 
-  // Replace start button to strip stale listeners (accumulated from repeated lobby:state calls)
   const oldBtn = document.getElementById('startBtn');
   if (oldBtn) {
     const newBtn = oldBtn.cloneNode(true);
@@ -352,7 +346,6 @@ function renderPlayerList(players) {
 }
 
 socket.on('client:hello', ({ realm } = {}) => {
-  // LAN players bypass the join code, so don't prompt them for one.
   codeRequired = realm !== 'lan';
   applyRealmToJoinPanel();
 });

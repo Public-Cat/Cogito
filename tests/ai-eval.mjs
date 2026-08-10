@@ -2,10 +2,9 @@
 import { io } from "socket.io-client";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { resolve } from "path";
+import { resetSession, sleep } from "./_utils.mjs";
 
 const BASE = process.env.EVAL_BASE || "http://192.168.1.32:3000";
-// Connect on the trusted LAN realm so Alice can become host and joins bypass
-// the per-session code gate (the eval scripts a full game, not the gate).
 const LAN_HEADERS = { extraHeaders: { "X-Cogito-Realm": "lan" } };
 const MODELS = (process.env.MODELS || "qwen2.5:7b,mistral,mistral-nemo,llama3.1:8b,gemma3")
   .split(",").map(s => s.trim()).filter(Boolean);
@@ -24,7 +23,6 @@ const SIDE_TAKING = ["i agree", "agreed", "you're right", "youre right", "no way
   "i don't buy", "i dont buy", "exactly", "good point", "i think you're", "nah", "for sure",
   "i'm with", "im with", "back off", "leave", "reaching"];
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const ts = () => new Date().toISOString().replace(/[:.]/g, "-");
 const sanitize = (s) => s.replace(/[^a-zA-Z0-9._-]/g, "_");
 const words = (t) => t.trim().split(/\s+/).filter(Boolean).length;
@@ -95,14 +93,7 @@ async function runGameForModel(model) {
   await warmup(model);
   console.log(`  warm in ${((Date.now() - warmStart) / 1000).toFixed(1)}s`);
 
-  // Reset stale session
-  const rs = io(BASE, { forceNew: true, ...LAN_HEADERS });
-  await new Promise(r => rs.on("connect", r));
-  rs.emit("lobby:setName", { name: "Resetter" });
-  await sleep(200);
-  rs.emit("lobby:reset");
-  await sleep(400);
-  rs.disconnect();
+  await resetSession();
 
   const alice = await connectNamed("Alice");
   if (!alice.isHost) throw new Error("Alice should be host after reset");

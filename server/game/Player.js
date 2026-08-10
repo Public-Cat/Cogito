@@ -10,11 +10,7 @@ export class Player {
     this.model = null;
     this.messageHistory = null;
     this.currentVote = null;
-    // 'lan' players are eligible to be host (set from socket.data.realm).
-    // Defaults to 'public' fail-safe; AIs have no socket so stay 'public'.
-    this.realm = 'public';
-    // Secret token proving ownership of this player slot across reconnects.
-    // Generated for humans on creation; never sent to anyone but the owner.
+    this.realm = 'public'; // 'lan' if behind trusted reverse proxy
     this.rejoinToken = null;
   }
 }

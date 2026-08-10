@@ -62,10 +62,7 @@ const STATES = {
 export class GameSession {
   constructor() {
     this.state = STATES.LOBBY;
-    // Per-session join code, shown only to the host so they can share it with
-    // public-realm friends. Regenerated whenever a new session is created
-    // (i.e. on reset / return-to-lobby, which null and recreate the session).
-    this.sessionCode = generateSessionCode();
+    this.sessionCode = generateSessionCode(); // shown only to host
     this.players = [];
     this.messages = [];
     this.topic = '';
@@ -82,17 +79,11 @@ export class GameSession {
     this.voteTimeout = null;
     this.postVoteTimer = null;
     this.aiRankingsResolved = false;
-    // Idempotency guard for resolveRankings — set true when a voting round is
-    // resolved, reset in startVoting, so a late AI ranking arriving in the 3s
-    // postVoteTimer window cannot double-eliminate or duplicate game:voteResult.
-    this.votingResolved = false;
+    this.votingResolved = false; // prevents double-resolution from late AI rankings
     this.bordaHistory = new Map();
     this.lastElimination = null;
     this.lastRoundMessages = [];
-    // Set once by endGame() so a player who refreshes after the game ends
-    // (re-entering via game:rejoin, which only replays game:state) still
-    // gets the winner/reveal payload instead of being stuck in the chat view.
-    this.endResult = null;
+    this.endResult = null; // persisted for end-screen replay on rejoin
   }
 
   addPlayer(id, isHuman, socketId) {
@@ -156,10 +147,7 @@ export class GameSession {
       player.isDisconnected = true;
       if (this.state === STATES.SUBMITTING) {
         this.submittedPlayerIds.delete(player.id);
-        // If the remaining active players (excluding the now-disconnected one,
-        // since isDisconnected was set above) have all submitted, resolve now
-        // rather than idling for the full 45s timer. This prevents a submit-phase
-        // stall when a player disconnects after everyone else has already sent.
+        // Resolve early if everyone else already submitted (skip 120s wait).
         const remaining = this.getActivePlayers();
         if (remaining.length > 0 && remaining.every(p => this.submittedPlayerIds.has(p.id))) {
           this.resolveSubmitPhase();
@@ -199,15 +187,6 @@ export class GameSession {
     };
   }
 
-  /**
-   * Ask the model for a human first name not already in `taken` (lowercased, case-insensitive).
-   * Sanitizes to the allowed name charset, retries on duplicates/invalid/failed responses, and
-   * falls back to a unique AI-xxxx handle if the model won't produce a fresh distinct name
-   * (e.g. a model that deterministically returns the same name).
-   * @param {string} model
-   * @param {Set<string>} taken - lowercased names already in use
-   * @returns {Promise<string>}
-   */
   async generateUniqueAIName(model, taken) {
     for (let attempt = 0; attempt < 10; attempt++) {
       const res = await chat(model, [{ role: 'user', content: buildNamePrompt() }]);
@@ -266,27 +245,23 @@ export class GameSession {
 
     const activePlayers = this.getActivePlayers();
     if (activePlayers.length <= 1) {
-      this.endGame();
+      const humans = this.players.filter(p => p.isHuman && !p.isEliminated);
+      const ais = this.players.filter(p => !p.isHuman && !p.isEliminated);
+      if (humans.length === 0) this.endGame('ais');
+      else if (humans.length === 1) this.endGame('solo', humans[0]);
+      else if (ais.length === 0) this.endGame('humans');
+      else this.endGame('ais');
       return;
     }
 
     const activeAIs = activePlayers.filter(p => !p.isHuman);
-    // Fire-and-forget, but bounded: each generateAIMessage() already resolves
-    // its own state independently, so we don't await this pool's result.
+
     promisePool(activeAIs.map(ai => () => this.generateAIMessage(ai)), MAX_CONCURRENT_OLLAMA_CALLS)
       .catch(err => console.error('AI message pool error:', err));
 
     this.submitTimer = setTimeout(() => this.resolveSubmitPhase(), SUBMIT_PHASE_MS);
   }
 
-  /**
-   * Build a one-line salience cue from last round's messages so an AI's next message
-   * lands on the live thread (esp. accusations). Deterministic, no LLM call. Derived
-   * ONLY from already-resolved prior-round messages — never the current round — so it
-   * adds no information the AI wouldn't already have, preserving simultaneous-submit fairness.
-   * @param {Player} ai - the AI about to generate
-   * @returns {string|null} hint like "Alice suspects Sophia is the human", or null
-   */
   buildDiscussionHint(ai) {
     const recent = this.lastRoundMessages;
     if (!recent || recent.length === 0) return null;
@@ -313,13 +288,7 @@ export class GameSession {
   }
 
   async generateAIMessage(ai) {
-    // Capture the round counter before the async Ollama call so we can detect
-    // stale replies that arrive after a round transition. The phase ends on a
-    // fixed timer (SUBMIT_PHASE_MS) whether or not every AI has replied, and the
-    // pool caps concurrency at MAX_CONCURRENT_OLLAMA_CALLS — so a chat queued
-    // behind others can start late and return after the round moved on (during
-    // REVEALING or round-N+1 SUBMITTING). Without this guard that reply would be
-    // injected into the wrong round's transcript and messageHistory.
+    // Guard against stale replies from the concurrency pool arriving after round transition.
     const round = this.round;
     const turnPrompt = buildTurnPrompt(this.lastElimination, this.buildDiscussionHint(ai), this.round === 0);
     const messages = [...ai.messageHistory, { role: 'user', content: turnPrompt }];
@@ -401,7 +370,12 @@ export class GameSession {
 
     const activePlayers = this.getActivePlayers();
     if (activePlayers.length <= 1) {
-      this.endGame();
+      const humans = this.players.filter(p => p.isHuman && !p.isEliminated);
+      const ais = this.players.filter(p => !p.isHuman && !p.isEliminated);
+      if (humans.length === 0) this.endGame('ais');
+      else if (humans.length === 1) this.endGame('solo', humans[0]);
+      else if (ais.length === 0) this.endGame('humans');
+      else this.endGame('ais');
       return;
     }
 
@@ -463,8 +437,7 @@ export class GameSession {
       }
     });
 
-    // Each task already catches its own errors, so the pool (built on
-    // Promise.all over workers) is equivalent to the prior Promise.allSettled.
+
     await promisePool(rankingTasks, MAX_CONCURRENT_OLLAMA_CALLS);
     this.aiRankingsResolved = true;
     // If all *currently active* humans already voted while AIs were ranking, resolve early.
@@ -493,9 +466,7 @@ export class GameSession {
     const seen = new Set();
     const ranked = [];
     for (const token of tokens) {
-      // Use word-boundary regex rather than unbounded substring so short names
-      // ("Al", "Ed", "Sam") don't false-match words like "also"/"predicted"/"same".
-      // Names are [a-zA-Z0-9 ], so \b correctly anchors at the name's edges.
+
       const match = candidates.find(p => {
         if (seen.has(p.id)) return false;
         const escaped = p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -568,11 +539,7 @@ export class GameSession {
       bordaScores.set(p.id, 0);
     }
 
-    // Normalized Borda: score each position relative to N-1 (the expected full
-    // ranking length) rather than the actual parsed length. Position i earns
-    // max(0, N-2-i) points, so the top pick always gets N-2 — matching a human
-    // vote — regardless of whether the AI listed all players or just one.
-    // Secondary positions still count and contribute to the tally.
+    // Normalized Borda: top pick = N-2 points, matching a human vote weight.
     const humanVotePoints = Math.max(1, activePlayers.length - 2);
 
     for (const ranking of this.aiRankings.values()) {
@@ -637,7 +604,7 @@ export class GameSession {
   }
 
   resolveBordaTie(tiedPlayerIds) {
-    // Level 2 tiebreaker: which tied player appears earliest (highest rank) in more individual AI rankings
+    // Level 2: highest-rank count across AI rankings + human votes
     const firstPlaceCounts = new Map();
     for (const id of tiedPlayerIds) {
       firstPlaceCounts.set(id, 0);
@@ -658,9 +625,7 @@ export class GameSession {
       }
     }
 
-    // A human's single vote is always their "first place" pick, so it counts
-    // toward this tiebreaker the same way an AI's top-ranked pick does.
-    // Skip stale votes from since-disconnected voters (same filter as resolveRankings).
+
     const activeHumanIds = new Set(this.getActiveHumans().map(p => p.id));
     for (const [voterId, targetId] of this.humanVotes.entries()) {
       if (!activeHumanIds.has(voterId)) continue;
@@ -679,7 +644,7 @@ export class GameSession {
       return winner;
     }
 
-    // Level 3 tiebreaker: cumulative Borda history across all prior voting rounds
+    // Level 3: cumulative Borda history
     leaders.sort((a, b) => (this.bordaHistory.get(b[0]) || 0) - (this.bordaHistory.get(a[0]) || 0));
     if ((this.bordaHistory.get(leaders[0][0]) || 0) !== (this.bordaHistory.get(leaders[1][0]) || 0)) {
       const winner = this.getPlayer(leaders[0][0]);
@@ -687,18 +652,14 @@ export class GameSession {
       return winner;
     }
 
-    // All tiebreakers exhausted — no elimination this round.
+
     const tiedNames = tiedPlayerIds.map(id => this.getPlayer(id)?.name).join(', ');
     console.log(`[GAME] Perfect tie unresolved — no elimination this round [${tiedNames}]`);
     return null;
   }
 
   checkWinCondition() {
-    // Win determination is based on ELIMINATION, not transient disconnection.
-    // A human who refreshes mid-game (supported rejoin path) must not spuriously
-    // trigger a solo win during the 3s postVoteTimer window while disconnected.
-    // Disconnected-but-not-eliminated humans are still counted as alive here.
-    // (Disconnected AIs were already excluded only by isEliminated, unchanged.)
+    // Based on elimination, not disconnection (rejoin is supported).
     const aliveHumans = this.players.filter(p => p.isHuman && !p.isEliminated);
     const aliveAIs = this.players.filter(p => !p.isHuman && !p.isEliminated);
 
@@ -725,12 +686,16 @@ export class GameSession {
     if (this.postVoteTimer) { clearTimeout(this.postVoteTimer); this.postVoteTimer = null; }
   }
 
+  determineWinner() {
+    const humans = this.players.filter(p => p.isHuman && !p.isEliminated);
+    const ais = this.players.filter(p => !p.isHuman && !p.isEliminated);
+    if (humans.length === 0) return { type: 'ais' };
+    if (humans.length === 1) return { type: 'solo', player: humans[0] };
+    if (ais.length === 0) return { type: 'humans' };
+    return { type: 'ais' };
+  }
+
   endGame(winnerType, winnerPlayer = null) {
-    if (!winnerType) {
-      const result = this.determineWinner();
-      this.endGame(result.type, result.player);
-      return;
-    }
     this.clearTimers();
     this.state = STATES.ENDED;
     const winnerStr = winnerType === 'solo' ? `${winnerPlayer.name} (solo)` : winnerType;
@@ -753,23 +718,13 @@ export class GameSession {
     this.emitToAll('game:ended', payload);
   }
 
-  determineWinner() {
-    // Same elimination-only filter as checkWinCondition — disconnection is transient.
-    const aliveHumans = this.players.filter(p => p.isHuman && !p.isEliminated);
-    const aliveAIs = this.players.filter(p => !p.isHuman && !p.isEliminated);
-    if (aliveHumans.length === 0) return { type: 'ais' };
-    // Sole survivor wins outright, independent of remaining AI count — see checkWinCondition().
-    if (aliveHumans.length === 1) return { type: 'solo', player: aliveHumans[0] };
-    if (aliveAIs.length === 0) return { type: 'humans' };
-    return { type: 'ais' };
-  }
+
 
   emitGameState() {
     const state = this.getGameState();
     for (const p of this.players) {
       if (p.socketId) {
-        // myToken is sent ONLY to its owner — never broadcast or attached to
-        // other players' entries — so it can't be read off the wire by others.
+
         this.emitToSocket(p.socketId, 'game:state', { ...state, myId: p.id, myToken: p.rejoinToken || null });
       }
     }
