@@ -42,7 +42,7 @@ All tests are plain Node scripts (no framework), exit via `process.exit(0|1)`. N
 - Tests connect to `http://192.168.1.32:3000` (dev server port 3000, not Docker port 3008).
 
 ## Game state machine
-`LOBBY → SUBMITTING (45s) → REVEALING (10s) → (loop, round<2) → VOTING_SOON (5s) → VOTING (40s) → (3s delay) → SUBMITTING or ENDED`
+`LOBBY → SUBMITTING (120s) → REVEALING (10s) → (loop, round<2) → VOTING_SOON (45s) → VOTING (40s) → (3s delay) → SUBMITTING or ENDED`
 
 Minimum **2 humans + 1 AI** to start. Voting starts round ≥ 2, then every round.
 
@@ -94,7 +94,7 @@ Built for public hosting via **Cloudflare Tunnel → Caddy → app**. See `deplo
 - **Tests**: host client must connect with `extraHeaders: { 'X-Cogito-Realm': 'lan' }`; `tests/security.mjs` covers the access-control surface.
 
 ## Ollama
-- Default URL configurable via `OLLAMA_BASE_URL`. Model list polled every 30s, cached. Timeouts: chat 30s, model list 5s.
+- Default URL configurable via `OLLAMA_BASE_URL`. Model list polled every 30s, cached. Timeouts: chat 105s, model list 5s.
 - On failure, returns `"..."` — does not crash.
 
 ## Docker
