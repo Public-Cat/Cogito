@@ -2,10 +2,21 @@ import { playVote, playEliminated, playWin, playLose } from './sfx.js';
 
 const socket = io();
 
-let myId = sessionStorage.getItem('cogito_myId') || null;
+const urlParams = new URLSearchParams(window.location.search);
+let myId = urlParams.get('myId') || localStorage.getItem('cogito_myId') || null;
+// Token is keyed by id so two tabs in one browser don't clobber each other's
+// secret (myId arrives per-tab via the URL param; see multi-tab collision bug).
+let myToken = myId ? localStorage.getItem('cogito_myToken_' + myId) : null;
 let gameState = null;
+const SUBMIT_PHASE_SECONDS = 45;
+const VOTE_SECONDS = 40;
+
 let voteSoonCountdown = null;
 let voteSoonInterval = null;
+let submitCountdown = SUBMIT_PHASE_SECONDS;
+let revealCountdown = 10;
+let submitCountdownInterval = null;
+let revealCountdownInterval = null;
 
 const app = document.getElementById('app');
 
@@ -31,7 +42,7 @@ function render() {
     </div>
     <div id="votingOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.95);z-index:100;justify-content:center;align-items:center;flex-direction:column;">
       <h2 style="color:var(--color-warning);margin-bottom:24px;">> VOTING PHASE</h2>
-      <p id="voteTimer" style="color:var(--color-text-dim);margin-bottom:16px;">5</p>
+      <p id="voteTimer" style="color:var(--color-text-dim);margin-bottom:16px;">${VOTE_SECONDS}</p>
       <div id="voteTargets" style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;max-width:600px;"></div>
       <div id="voteWaiting" style="display:none;color:var(--color-text-dim);margin-top:24px;">> WAITING FOR VOTES...</div>
     </div>
@@ -72,47 +83,110 @@ function sendMessage() {
   document.getElementById('sendBtn').disabled = true;
 }
 
+function stopCountdowns() {
+  if (submitCountdownInterval) { clearInterval(submitCountdownInterval); submitCountdownInterval = null; }
+  if (revealCountdownInterval) { clearInterval(revealCountdownInterval); revealCountdownInterval = null; }
+  if (voteSoonInterval) { clearInterval(voteSoonInterval); voteSoonInterval = null; }
+}
+
+function startSubmitCountdown() {
+  submitCountdown = SUBMIT_PHASE_SECONDS;
+  stopCountdowns();
+  submitCountdownInterval = setInterval(() => {
+    submitCountdown--;
+    updateIndicator();
+    if (submitCountdown <= 0) {
+      clearInterval(submitCountdownInterval);
+      submitCountdownInterval = null;
+    }
+  }, 1000);
+}
+
+function startRevealCountdown() {
+  revealCountdown = 10;
+  stopCountdowns();
+  revealCountdownInterval = setInterval(() => {
+    revealCountdown--;
+    updateIndicator();
+    if (revealCountdown <= 0) {
+      clearInterval(revealCountdownInterval);
+      revealCountdownInterval = null;
+    }
+  }, 1000);
+}
+
+function updateIndicator() {
+  const state = gameState;
+  if (!state) return;
+  const el = document.getElementById('turnIndicator');
+  if (state.phase === 'SUBMITTING') {
+    const hasSubmitted = state.submittedBy && state.submittedBy.includes(myId);
+    if (!hasSubmitted) {
+      el.textContent = `> write your response (${submitCountdown}s)`;
+    } else {
+      const remaining = state.activePlayerCount - state.submittedBy.length;
+      el.textContent = `> waiting for ${remaining} player(s)... (${submitCountdown}s)`;
+    }
+  } else if (state.phase === 'REVEALING') {
+    el.textContent = `> reading responses... (${revealCountdown}s)`;
+  } else if (state.phase === 'VOTING_SOON') {
+    const remaining = voteSoonCountdown !== null ? voteSoonCountdown : 5;
+    el.textContent = `> voting in ${remaining}s...`;
+  } else {
+    el.textContent = '';
+  }
+}
+
 function updateUI(state) {
   gameState = state;
   if (state.myId) {
     myId = state.myId;
+    localStorage.setItem('cogito_myId', state.myId);
+  }
+  if (state.myToken && (state.myId || myId)) {
+    myToken = state.myToken;
+    localStorage.setItem('cogito_myToken_' + (state.myId || myId), state.myToken);
   }
 
   document.getElementById('topicDisplay').textContent = `> ${state.topic || 'no topic'}`;
   document.getElementById('roundDisplay').textContent = `round ${state.round}`;
   document.getElementById('phaseDisplay').textContent = state.phase;
 
-  const isMyTurn = state.currentTurn === myId;
+  document.getElementById('eliminationOverlay').style.display = 'none';
+  if (state.phase !== 'VOTING') {
+    document.getElementById('votingOverlay').style.display = 'none';
+  }
+
   const input = document.getElementById('msgInput');
   const sendBtn = document.getElementById('sendBtn');
-  const turnIndicator = document.getElementById('turnIndicator');
 
-  if (state.phase === 'PLAYING') {
-    document.getElementById('eliminationOverlay').style.display = 'none';
-    input.disabled = !isMyTurn;
-    sendBtn.disabled = !isMyTurn;
-    if (isMyTurn) {
-      turnIndicator.textContent = '> your turn';
+  if (state.phase === 'SUBMITTING') {
+    const hasSubmitted = state.submittedBy && state.submittedBy.includes(myId);
+    input.disabled = hasSubmitted;
+    sendBtn.disabled = hasSubmitted;
+    if (!hasSubmitted) {
       input.focus();
-    } else {
-      const currentPlayer = state.players.find(p => p.id === state.currentTurn);
-      turnIndicator.textContent = currentPlayer ? `> waiting for ${currentPlayer.name}...` : '> waiting...';
     }
+    updateIndicator();
+  } else if (state.phase === 'REVEALING') {
+    input.disabled = true;
+    sendBtn.disabled = true;
+    updateIndicator();
   } else if (state.phase === 'VOTING_SOON') {
     input.disabled = true;
     sendBtn.disabled = true;
     const remaining = voteSoonCountdown !== null ? voteSoonCountdown : 5;
-    turnIndicator.textContent = `> voting in ${remaining}s...`;
+    document.getElementById('turnIndicator').textContent = `> voting in ${remaining}s...`;
   } else {
     input.disabled = true;
     sendBtn.disabled = true;
-    turnIndicator.textContent = '';
+    document.getElementById('turnIndicator').textContent = '';
   }
 
-  renderPlayerList(state.players, state.currentTurn);
+  renderPlayerList(state.players, state.submittedBy || []);
 }
 
-function renderPlayerList(players, currentTurnId) {
+function renderPlayerList(players, submittedBy) {
   const sidebar = document.getElementById('playerSidebar');
   sidebar.style.display = 'block';
   sidebar.innerHTML = `
@@ -135,17 +209,26 @@ function renderPlayerList(players, currentTurnId) {
     div.style.justifyContent = 'space-between';
     div.style.alignItems = 'center';
     if (p.isEliminated) div.style.opacity = '0.4';
-    if (p.id === currentTurnId) {
+    const hasSubmitted = submittedBy.includes(p.id);
+    if (hasSubmitted && !p.isEliminated) {
       div.style.borderLeft = '2px solid var(--color-primary)';
       div.style.paddingLeft = '4px';
     }
     const nameSpan = document.createElement('span');
     nameSpan.textContent = `> ${p.name}`;
+    if (hasSubmitted && !p.isEliminated) {
+      nameSpan.textContent += ' \u2713';
+    }
     if (p.isEliminated) {
       const termTag = document.createElement('span');
       termTag.textContent = ' [TERMINATED]';
       termTag.style.color = 'var(--color-danger)';
       nameSpan.appendChild(termTag);
+    } else if (p.isDisconnected) {
+      const discTag = document.createElement('span');
+      discTag.textContent = ' [DISCONNECTED]';
+      discTag.style.color = 'var(--color-warning)';
+      nameSpan.appendChild(discTag);
     }
     div.appendChild(nameSpan);
     sidebar.appendChild(div);
@@ -158,7 +241,7 @@ function addMessage(msg, animate = true) {
   div.style.marginBottom = '4px';
   div.style.wordBreak = 'break-word';
 
-  if (animate && msg.playerId !== myId) {
+  if (animate) {
     const prefix = document.createElement('span');
     prefix.style.color = 'var(--color-text-dim)';
     prefix.textContent = `[${msg.playerName}] > `;
@@ -197,11 +280,11 @@ function showVotingOverlay() {
   overlay.style.display = 'flex';
   const targetsDiv = document.getElementById('voteTargets');
   targetsDiv.innerHTML = '';
-  document.getElementById('voteTimer').textContent = '10';
+  document.getElementById('voteTimer').textContent = String(VOTE_SECONDS);
   document.getElementById('voteWaiting').style.display = 'none';
 
   if (!gameState) return;
-    const activePlayers = gameState.players.filter(p => !p.isEliminated && !p.isDisconnected);
+  const activePlayers = gameState.players.filter(p => !p.isEliminated && !p.isDisconnected);
   const me = gameState.players.find(p => p.id === myId);
 
   if (me && me.isHuman && !me.isEliminated) {
@@ -212,7 +295,7 @@ function showVotingOverlay() {
       btn.style.padding = '12px 24px';
       btn.style.margin = '4px';
       btn.addEventListener('click', () => {
-        socket.emit('game:vote', { targetId: p.id });
+        socket.emit('game:castVote', { targetId: p.id });
         document.querySelectorAll('#voteTargets button').forEach(b => b.disabled = true);
         document.getElementById('voteWaiting').style.display = 'block';
       });
@@ -222,7 +305,7 @@ function showVotingOverlay() {
     targetsDiv.innerHTML = '<p style="color:var(--color-text-dim);">> waiting for humans to vote...</p>';
   }
 
-  let timeLeft = 10;
+  let timeLeft = VOTE_SECONDS;
   const timer = setInterval(() => {
     timeLeft--;
     document.getElementById('voteTimer').textContent = timeLeft;
@@ -239,18 +322,27 @@ function showVoteResult(result) {
   const overlay = document.getElementById('eliminationOverlay');
   const content = document.getElementById('eliminationContent');
 
-  const eliminated = [];
-  if (result.aiEliminated) eliminated.push(result.aiEliminated);
-  if (result.humanEliminated) eliminated.push(result.humanEliminated);
+  const countLine = `remaining: ${result.remainingHumans} humans, ${result.remainingAIs} AIs`;
 
-  if (eliminated.length > 0) {
-    content.innerHTML = eliminated.map(p => `
-      <div style="margin:12px 0;padding:16px 24px;border:1px solid var(--color-danger);color:var(--color-danger);font-size:1.3em;text-align:center;box-shadow:0 0 8px var(--color-danger);">
-        > ${p.name} TERMINATED
-      </div>
-    `).join('');
+  content.innerHTML = '';
+  if (result.eliminated) {
+    const p = result.eliminated;
+    const type = p.isHuman ? 'HUMAN' : 'AI';
+    const termDiv = document.createElement('div');
+    termDiv.style.cssText = 'margin:12px 0;padding:16px 24px;border:1px solid var(--color-danger);color:var(--color-danger);font-size:1.3em;text-align:center;box-shadow:0 0 8px var(--color-danger);';
+    termDiv.textContent = `> ${p.name} TERMINATED (${type})`;
+    const countP = document.createElement('p');
+    countP.style.cssText = 'color:var(--color-text-dim);text-align:center;margin-top:12px;';
+    countP.textContent = countLine;
+    content.append(termDiv, countP);
   } else {
-    content.innerHTML = '<p style="color:var(--color-text-dim);font-size:1.2em;">> NO ELIMINATION THIS ROUND</p>';
+    const noElimP = document.createElement('p');
+    noElimP.style.cssText = 'color:var(--color-text-dim);font-size:1.2em;text-align:center;';
+    noElimP.textContent = '> NO ELIMINATION THIS ROUND';
+    const countP = document.createElement('p');
+    countP.style.cssText = 'color:var(--color-text-dim);text-align:center;margin-top:12px;';
+    countP.textContent = countLine;
+    content.append(noElimP, countP);
   }
 
   overlay.style.display = 'flex';
@@ -260,11 +352,22 @@ function showVoteResult(result) {
   div.style.margin = '8px 0';
   div.style.padding = '8px';
   div.style.border = '1px solid var(--color-primary-dim)';
-  div.innerHTML = `
-    <div style="color:var(--color-warning);">> VOTE RESULT</div>
-    ${result.aiEliminated ? `<div>AI vote eliminated: ${result.aiEliminated.name}</div>` : '<div style="color:var(--color-text-dim);">AI vote: no elimination (tie)</div>'}
-    ${result.humanEliminated ? `<div>Human vote eliminated: ${result.humanEliminated.name}</div>` : '<div style="color:var(--color-text-dim);">Human vote: no elimination (tie)</div>'}
-  `;
+  const headerDiv = document.createElement('div');
+  headerDiv.style.color = 'var(--color-warning)';
+  headerDiv.textContent = '> VOTE RESULT';
+  div.appendChild(headerDiv);
+  if (result.eliminated) {
+    const p = result.eliminated;
+    const type = p.isHuman ? 'HUMAN' : 'AI';
+    const detailDiv = document.createElement('div');
+    detailDiv.textContent = `Eliminated: ${p.name} (${type}) — ${countLine}`;
+    div.appendChild(detailDiv);
+  } else {
+    const detailDiv = document.createElement('div');
+    detailDiv.style.color = 'var(--color-text-dim)';
+    detailDiv.textContent = `No elimination (tie) — ${countLine}`;
+    div.appendChild(detailDiv);
+  }
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
 }
@@ -273,7 +376,10 @@ function showEndScreen(data) {
   document.getElementById('eliminationOverlay').style.display = 'none';
   document.getElementById('endOverlay').style.display = 'flex';
   const title = document.getElementById('endTitle');
-  if (data.winner === 'humans') {
+  if (data.winner === 'solo') {
+    title.textContent = `> ${data.winnerPlayerName} IS THE SOLE SURVIVOR`;
+    title.style.color = 'var(--color-primary)';
+  } else if (data.winner === 'humans') {
     title.textContent = '> HUMANS WIN';
     title.style.color = 'var(--color-primary)';
   } else {
@@ -287,17 +393,48 @@ function showEndScreen(data) {
     div.style.padding = '4px 0';
     const identity = p.isHuman ? 'HUMAN' : `AI (${p.model || 'unknown'})`;
     const color = p.isHuman ? 'var(--color-primary)' : 'var(--color-warning)';
-    div.innerHTML = `<span>> ${p.name}</span> <span style="color:${color};">${identity}</span>`;
+    // Build with textContent (not innerHTML) so a player name or model string
+    // can never inject markup into the end-screen reveal.
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = `> ${p.name}`;
+    const identitySpan = document.createElement('span');
+    identitySpan.style.color = color;
+    identitySpan.textContent = identity;
+    div.append(nameSpan, document.createTextNode(' '), identitySpan);
     revealDiv.appendChild(div);
   });
 }
 
 socket.on('game:state', (state) => {
+  const wasSubmitting = gameState?.phase === 'SUBMITTING';
+  const isRevealing = state.phase === 'REVEALING';
+  
   updateUI(state);
+  
   const container = document.getElementById('messages');
-  if (container && state.messages) {
+  if (container && state.messages && !(wasSubmitting && isRevealing)) {
     container.innerHTML = '';
     state.messages.forEach(msg => addMessage(msg, false));
+  }
+  
+  if (state.phase === 'SUBMITTING') {
+    startSubmitCountdown();
+  } else if (state.phase === 'REVEALING') {
+    stopCountdowns();
+    startRevealCountdown();
+  } else if (state.phase === 'VOTING_SOON') {
+    // Leave voteSoonInterval running — game:votingSoon already started it.
+    if (submitCountdownInterval) { clearInterval(submitCountdownInterval); submitCountdownInterval = null; }
+    if (revealCountdownInterval) { clearInterval(revealCountdownInterval); revealCountdownInterval = null; }
+  } else {
+    stopCountdowns();
+  }
+
+  // Rejoining after the game already ended (e.g. a page refresh) only
+  // replays game:state, never the one-shot game:ended event, so the end
+  // screen must be reconstructed from the persisted endResult here too.
+  if (state.phase === 'ENDED' && state.endResult) {
+    showEndScreen(state.endResult);
   }
 });
 
@@ -345,15 +482,19 @@ socket.on('game:voteStart', () => {
   showVotingOverlay();
 });
 
+socket.on('game:voteProgress', ({ votedCount, totalEligible }) => {
+  document.getElementById('voteWaiting').textContent = `> WAITING FOR VOTES... (${votedCount}/${totalEligible})`;
+});
+
 socket.on('game:voteResult', (result) => {
-  if (result.aiEliminated || result.humanEliminated) {
+  if (result.eliminated) {
     playEliminated();
   }
   showVoteResult(result);
 });
 
 socket.on('game:ended', (data) => {
-  if (data.winner === 'humans') {
+  if (data.winner === 'humans' || data.winner === 'solo') {
     playWin();
   } else {
     playLose();
@@ -378,5 +519,5 @@ socket.on('error', ({ message }) => {
 render();
 
 if (myId) {
-  socket.emit('game:rejoin', { playerId: myId });
+  socket.emit('game:rejoin', { playerId: myId, token: myToken });
 }

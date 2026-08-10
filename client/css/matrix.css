@@ -138,3 +138,28 @@ select {
   font-family: var(--font-mono);
   font-size: 12px;
 }
+
+.rules-content {
+  max-height: 400px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--color-primary-dim);
+  background: rgba(0, 0, 0, 0.5);
+  line-height: 1.6;
+  font-size: 13px;
+}
+
+.rules-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.rules-content::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+
+.rules-content::-webkit-scrollbar-thumb {
+  background: var(--color-primary-dim);
+}

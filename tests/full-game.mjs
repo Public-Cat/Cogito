@@ -1,26 +1,32 @@
 import { io } from "socket.io-client";
 
-const BASE = "http://192.168.1.32:3000";
+const BASE = process.env.COGITO_URL || "http://192.168.1.32:3000";
 
-function waitForState(socket) {
-  return new Promise(r => socket.once("game:state", r));
-}
-
-function waitForVoteResult(socket) {
-  return new Promise(r => socket.once("game:voteResult", r));
-}
-
-function waitForEnded(socket) {
-  return new Promise(r => socket.once("game:ended", r));
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
 }
 
 async function main() {
   console.log("=== Full Game Flow Test: Voting + End ===\n");
   const t = (msg) => console.log("  [" + (Date.now() % 100000) + "] " + msg);
 
+  // 0. Reset any stale session
+  t("Resetting stale session...");
+  const resetSocket = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
+  await new Promise(r => resetSocket.on("connect", r));
+  // lobby:reset requires the caller to be a lan host, so join first to
+  // become host of any leftover/empty session before resetting it.
+  await new Promise(r => {
+    resetSocket.emit("lobby:setName", { name: "Resetter" });
+    resetSocket.once("lobby:state", r);
+  });
+  resetSocket.emit("lobby:reset");
+  await sleep(500);
+  resetSocket.disconnect();
+
   // 1. Join as 2 humans
   t("Joining Player A (host)...");
-  const sA = io(BASE);
+  const sA = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
   await new Promise(r => sA.on("connect", r));
   const la = await new Promise(r => {
     sA.emit("lobby:setName", { name: "Alice" });
@@ -28,112 +34,126 @@ async function main() {
   });
   const aliceId = la.myId;
   t("Alice joined, myId=" + aliceId + ", isHost=" + la.isHost);
+  if (!la.isHost) throw new Error("FAIL: Alice should be host");
 
   t("Joining Player B...");
-  const sB = io(BASE);
+  const sB = io(BASE, { extraHeaders: { 'X-Cogito-Realm': 'lan' }, rejectUnauthorized: false });
   await new Promise(r => sB.on("connect", r));
   const lb = await new Promise(r => {
     sB.emit("lobby:setName", { name: "Bob" });
     sB.once("lobby:state", r);
   });
   const bobId = lb.myId;
-  t("Bob joined, myId=" + bobId + ", isHost=" + lb.isHost);
+  t("Bob joined, myId=" + bobId);
   if (lb.isHost) throw new Error("FAIL: Bob should not be host");
 
   // 2. Start game — set up listener BEFORE emitting
   t("Starting game with 1 AI (qwen2.5:7b)...");
-  const gsAPromise = waitForState(sA);
-  await new Promise(r => sA.emit("lobby:start", {
-    topic: "Is pineapple on pizza acceptable?",
-    aiPlayers: [{ model: "qwen2.5:7b" }],
-  }, r));
+  const gsAPromise = new Promise(r => sA.once("game:state", r));
+  await new Promise(r => {
+    sA.emit("lobby:start", {
+      topic: "Is pineapple on pizza acceptable?",
+      aiPlayers: [{ model: "qwen2.5:7b" }],
+    }, r);
+  });
 
   let state = await gsAPromise;
   t("Game started: phase=" + state.phase + ", players=" + state.players.length +
     " (H:" + state.players.filter(p => p.isHuman).length +
     " AI:" + state.players.filter(p => !p.isHuman).length + ")");
-  if (state.phase !== "PLAYING") throw new Error("FAIL: Phase should be PLAYING");
+  if (state.phase !== "SUBMITTING") throw new Error("FAIL: Phase should be SUBMITTING, got " + state.phase);
 
-  // 3. Play through all turns until voting
-  // Use a persistent voteStart flag instead of Promise.race to avoid missing game:state
-  let voteStarted = false;
-  sA.on("game:voteStart", () => { voteStarted = true; });
+  // 3. Drive the game through phases until it ends
+  let endedData = null;
+  let voteCount = 0;
+  let totalPhases = 0;
 
-  let turnCount = 0;
-  const maxTurns = 20;
+  // Persistent game:ended listener (catches end from any branch)
+  sA.on("game:ended", (data) => { endedData = data; });
 
-  while (state.phase === "PLAYING" && turnCount < maxTurns) {
-    turnCount++;
-    const current = state.players.find(p => p.id === state.currentTurn);
-    t("Turn " + turnCount + ": " + current.name + " (human=" + current.isHuman + ", round=" + state.round + ")");
+  function waitForState(socket) {
+    return new Promise(r => socket.once("game:state", r));
+  }
 
-    const statePromise = waitForState(sA);
+  const startTime = Date.now();
+  const MAX_DURATION_MS = 300000; // 5 min safety
 
-    if (current.isHuman) {
-      const sender = current.id === aliceId ? sA : sB;
-      sender.emit("game:sendMessage", {
-        text: current.name + "'s thought on pineapple pizza: it's a controversial topic with valid points on both sides.",
-      });
+  while (!endedData) {
+    if (Date.now() - startTime > MAX_DURATION_MS) {
+      throw new Error("TIMEOUT after " + (MAX_DURATION_MS / 1000) + "s");
     }
 
-    state = await statePromise;
-
-    if (voteStarted) {
-      t("Voting phase triggered!");
-      break;
+    totalPhases++;
+    if (totalPhases > 50) {
+      throw new Error("Too many phase transitions, possible infinite loop");
     }
 
-    // VOTING_SOON means the game is waiting 5s before voting
-    if (state.phase === "VOTING_SOON") {
-      t("Voting will start in 5s (VOTING_SOON)...");
+    if (state.phase === "SUBMITTING") {
+      t("SUBMITTING round " + state.round + " — both humans submitting...");
+
+      // Set up listener BEFORE submitting to avoid race
+      const nextState = waitForState(sA);
+      sA.emit("game:sendMessage", { text: "Alice exploring different angles on this topic." });
+      sB.emit("game:sendMessage", { text: "Bob considering the implications of what's been said." });
+      state = await nextState;
+
+    } else if (state.phase === "REVEALING") {
+      t("REVEALING round " + state.round + " — waiting...");
+      state = await waitForState(sA);
+
+    } else if (state.phase === "VOTING_SOON") {
+      t("VOTING_SOON — 5s until vote...");
+      state = await waitForState(sA);
+
+    } else if (state.phase === "VOTING") {
+      voteCount++;
+      t("VOTING round " + voteCount + " — waiting for AI votes...");
+
+      // Wait for vote result
+      const result = await new Promise(r => sA.once("game:voteResult", r));
+      t("Vote result: " + (result.eliminated
+        ? result.eliminated.name + " (" + (result.eliminated.isHuman ? "human" : "AI") + ")"
+        : "no elimination"));
+
+      // After voteResult: 3s delay → either game:state(SUBMITTING) or game:ended.
+      // Race both with a timeout to avoid hanging.
+      const next = await Promise.race([
+        waitForState(sA).then(s => ({ type: "state", state: s })),
+        new Promise(r => sA.once("game:ended", d => r({ type: "ended", data: d }))),
+        sleep(25000).then(() => ({ type: "timeout" })),
+      ]);
+
+      if (next.type === "state") {
+        state = next.state;
+      } else if (next.type === "ended") {
+        endedData = next.data;
+      } else {
+        throw new Error("Timeout waiting for post-vote transition");
+      }
+    } else {
+      throw new Error("Unexpected phase: " + state.phase);
     }
   }
 
-  sA.removeListener("game:voteStart");
-
-  // Wait for voteStart if not yet received (VOTING_SOON phase with 30s delay)
-  if (!voteStarted) {
-    t("Waiting for voteStart event...");
-    await new Promise(r => sA.once("game:voteStart", r));
-    t("Vote started!");
-    state = await waitForState(sA);
-  }
-
-  if (!state || state.phase !== "VOTING") {
-    throw new Error("FAIL: Expected VOTING phase, got " + (state ? state.phase : "null"));
-  }
-
-  t("In voting phase at round " + state.round + ", " + state.players.filter(p => !p.isEliminated).length + " active players");
-
-  // 4. Submit votes — both humans vote for the AI player
-  const aiPlayer = state.players.find(p => !p.isHuman);
-  if (!aiPlayer) throw new Error("FAIL: No AI player found");
-  t("AI player: " + aiPlayer.name + " (" + aiPlayer.id + ")");
-
-  const voteResultPromise = waitForVoteResult(sA);
-
-  sA.emit("game:vote", { targetId: aiPlayer.id });
-  t("Alice voted for " + aiPlayer.name);
-  await new Promise(r => setTimeout(r, 200));
-
-  sB.emit("game:vote", { targetId: aiPlayer.id });
-  t("Bob voted for " + aiPlayer.name);
-
-  // 5. Wait for vote result
-  const voteResult = await voteResultPromise;
-  t("Vote result: AI eliminated=" + (voteResult.aiEliminated ? voteResult.aiEliminated.name : "none") +
-    ", Human eliminated=" + (voteResult.humanEliminated ? voteResult.humanEliminated.name : "none"));
-
-  // 6. Wait for game end
-  const endData = await waitForEnded(sA);
-  t("Game ended! Winner: " + endData.winner);
-  endData.players.forEach(p => {
-    t("  " + p.name + " — " + (p.isHuman ? "HUMAN" : "AI (" + (p.model || "?") + ")") + (p.isEliminated ? " [ELIMINATED]" : ""));
+  // 4. Verify the end state
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  t("Game ended after " + voteCount + " vote round(s), " + elapsed + "s. Winner: " + endedData.winner);
+  endedData.players.forEach(p => {
+    t("  " + p.name + " — " + (p.isHuman ? "HUMAN" : "AI (" + (p.model || "?") + ")") +
+      (p.isEliminated ? " [ELIMINATED]" : ""));
   });
 
-  if (endData.winner !== "humans") throw new Error("FAIL: Humans should win");
+  if (!endedData.winner) throw new Error("FAIL: Missing winner field");
+  if (!["humans", "ais", "solo"].includes(endedData.winner)) {
+    throw new Error("FAIL: Invalid winner: " + endedData.winner);
+  }
+  if (!endedData.players || endedData.players.length < 2) {
+    throw new Error("FAIL: Missing or invalid players list");
+  }
+  if (voteCount < 1) throw new Error("FAIL: Expected at least 1 vote round, got " + voteCount);
 
-  // Cleanup: wait for server to acknowledge reset before closing
+  // 5. Cleanup
+  t("Returning to lobby...");
   await new Promise(r => {
     sA.emit("game:returnToLobby");
     sA.once("lobby:state", r);

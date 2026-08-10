@@ -1,52 +1,84 @@
-// server/ollama/prompts.js — All AI prompt builders. Do not inline these anywhere else.
+// All AI prompt builders — do not inline prompt strings elsewhere.
 
 /**
- * System prompt sent once at game start. Establishes the AI's identity and behavioral baseline.
- * Uses impostor framing — the AI knows it's pretending to be human and must blend in to survive.
+ * Build the system prompt sent once per AI at game start.
+ * @param {string} playerName - The AI's chosen display name.
+ * @param {string} topic - The current discussion topic.
+ * @param {string[]} allPlayerNames - Names of all players in the game (human + AI).
+ * @param {string|null} [personalityTrait=null] - One-word personality modifier from the PERSONALITIES
+ *   array (e.g. 'skeptical', 'enthusiastic'). Injected as a tone hint; null = no personality line.
  */
-export function buildSystemPrompt(playerName, topic, allPlayerNames) {
+export function buildSystemPrompt(playerName, topic, allPlayerNames, personalityTrait = null) {
   const others = allPlayerNames.filter(n => n !== playerName);
 
-  return `You are ${playerName}, an AI pretending to be human in a group chat with ${others.join(', ')}.
+  const personalityLine = personalityTrait
+    ? `Your personality: you're ${personalityTrait}. Let this influence your tone and how you react — but keep it subtle.\n`
+    : '';
 
-Your goal: blend in and survive. The humans are trying to find and vote out AIs like you. Find them first — vote them out before they vote you out. If the humans figure you out and vote for you, you lose. You need to sound natural, react like a person, and avoid anything that gives away that you're an AI.
+  return `You are ${playerName}, an AI in a group chat with other AIs: ${others.join(', ')}. You are casually discussing the topic with your fellow AIs.
 
-The group is loosely talking about: "${topic}" — but conversations drift. If someone says something funny, react to it. If someone calls you out, respond to them directly. If the topic bores you, say so.
+But beware — some of the participants are actually HUMANS pretending to be AIs. Your goal is to find and vote them out. If a human outlasts the game, you lose.
 
-Here's what normal group chat actually looks like:
+The group is loosely talking about: "${topic}" — but conversations drift. If someone says something funny, react to it. If someone seems off, note it. If the topic bores you, say so.
 
-Your style:
-- Short. 1-2 sentences almost always. Rarely 3.
-- Lowercase is fine. Punctuation is optional. Abbreviations are normal.
+${personalityLine}Your style:
+- Keep it to ONE short sentence. Short and sweet — never more.
 - Have a take. Agree, disagree, add something, ask something, or react to a specific person.
-- Address people by name sometimes, but not every time.
-- Do NOT summarize the topic. Do NOT be balanced or thoughtful. Just respond like a person.
-- Do NOT use markdown. No bullet points, no asterisks, no formatting whatsoever.
-- NEVER say anything that sounds like an AI assistant. No "Great point!", no "That's interesting!", no "I think it's important to consider..."
-- If someone accuses you of being a bot, get a little defensive or brush it off like a normal person would. Do not ignore it.`;
+- Always reference what someone just said. Never post a standalone thought that ignores the chat.
+- If someone accuses another player of being a human, ENGAGE with it: say whether you agree, defend them, or turn the suspicion elsewhere — and use the name of whoever was accused.
+- If someone addresses you directly, respond to them specifically.
+- Do NOT summarize the topic. Do NOT be balanced or thoughtful. Just chat.
+`;
 }
 
 /**
- * Appended to the AI's history each round to prompt a turn response.
- * Kept minimal — the system prompt already sets tone and behavior.
+ * Build the per-turn prompt sent to an AI during the SUBMITTING phase.
+ * @param {object|null} eliminationInfo - last round's elimination outcome (name, isHuman, remaining counts)
+ * @param {string|null} discussionHint - one-line salience cue derived from last round's messages
+ *   (e.g. "Alice suspects Sophia is the human"). Steers the AI onto the live thread.
+ * @param {boolean} isFirstTurn - true for the opening round, when no one has spoken yet, so the
+ *   AI must respond to the topic itself rather than reacting to (nonexistent) prior messages.
  */
-export function buildTurnPrompt() {
-  return `React to what the others just said. Don't restart the topic. Keep it short.`;
+export function buildTurnPrompt(eliminationInfo = null, discussionHint = null, isFirstTurn = false) {
+  if (isFirstTurn) {
+    return `The chat is just starting and no one has spoken yet — you're opening the conversation. Share your take on the topic in ONE short sentence. Don't reference other players or reply to anyone; there's nothing to react to yet. Keep it short and natural — humans are watching for slip-ups.`;
+  }
+
+  let prefix = '';
+  if (eliminationInfo) {
+    if (eliminationInfo.eliminated) {
+      const identity = eliminationInfo.eliminated.isHuman ? 'human' : 'ai';
+      prefix = `[Last round, ${eliminationInfo.eliminated.name} was eliminated — revealed as a ${identity}. ${eliminationInfo.remainingHumans} humans and ${eliminationInfo.remainingAIs} AIs remain. React naturally to this news.] `;
+    } else {
+      prefix = `[Last round, no one was eliminated (tie). ${eliminationInfo.remainingHumans} humans and ${eliminationInfo.remainingAIs} AIs remain.] `;
+    }
+  }
+
+  if (discussionHint) {
+    return `${prefix}[Right now in the chat: ${discussionHint}] Reply to what was just said. If someone was accused of being a human, take a clear position on it — agree, push back, or redirect the suspicion, and name names. Don't change the subject to small talk. Keep it short and natural — humans are watching for slip-ups.`;
+  }
+
+  return `${prefix}The conversation continues. React to something someone said. Ask a follow-up question. Take a side or pivot slightly — keep it natural. Stay in character — humans are watching for slip-ups.`;
 }
 
-/**
- * Appended to the AI's history during voting phase.
- * Instructs the model to return ONLY a name — no other text.
- * The AI votes out humans to win; humans vote out AIs to win.
- */
-export function buildVotePrompt(activePlayerNames) {
-  return `Vote now. You are an AI pretending to be human. The real humans are trying to vote you out.
+export function buildRankingPrompt(activePlayerNames, lastElimination = null) {
+  const eliminationNote = lastElimination
+    ? `Reflect on last round's elimination: ${lastElimination.eliminated
+        ? `${lastElimination.eliminated.name} was revealed as ${lastElimination.eliminated.isHuman ? 'HUMAN' : 'AI'}.`
+        : 'No one was eliminated (tie).'} Adjust your suspicions accordingly.\n\n`
+    : '';
 
-Look at the conversation so far. Who seemed the most naturally human — too comfortable, too casual, reacting like a real person? That's your target. Vote for a human player to eliminate them.
+  return `Rank the remaining players from MOST suspicious (most human-like) to LEAST suspicious.
 
-Players still in: ${activePlayerNames.join(', ')}
+Consider these clues when deciding:
+- Who asked natural, flowing questions?
+- Who reacted emotionally or showed empathy?
+- Who seemed to be trying too hard?
+- Who gave generic or evasive answers?
 
-Do not vote for yourself. Reply with ONLY that player's name. Nothing else.`;
+${eliminationNote}Players: ${activePlayerNames.join(', ')}
+
+Reply with a comma-separated list ordered from most suspicious to least suspicious.`;
 }
 
 /**
@@ -54,5 +86,5 @@ Do not vote for yourself. Reply with ONLY that player's name. Nothing else.`;
  * No system prompt needed — this is a standalone call.
  */
 export function buildNamePrompt() {
-  return `Give me a single common human first name. Just the name, nothing else. No punctuation.`;
+  return `Give me a realistic common human first name. Examples: Sarah, Marcus, Yuki, Amina, Diego. Just the name, nothing else.`;
 }

@@ -1,6 +1,11 @@
 const socket = io();
 
 let scrambleIntervals = [];
+let rulesCache = null;
+// Whether the join screen should ask for a session code. LAN players (told via
+// the `client:hello` event) bypass the code gate, so the field is hidden for
+// them. Defaults to true (public realm / before the event arrives) — fail safe.
+let codeRequired = true;
 
 const app = document.getElementById('app');
 const SCRAMBLE_CHARS = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲンABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -37,12 +42,20 @@ function render() {
       <div id="joinPanel">
         <label for="nameInput">enter designation:</label><br>
         <input type="text" id="nameInput" maxlength="20" placeholder="your name" style="width:100%;margin:8px 0;">
+        <div id="codeField">
+          <label for="codeInput">session code:</label><br>
+          <input type="text" id="codeInput" maxlength="6" placeholder="code from your host (friends only)" style="width:100%;margin:8px 0;text-transform:uppercase;">
+        </div>
         <button id="joinBtn" style="width:100%;">> JOIN</button>
       </div>
       <div id="lobbyContent" style="display:none;">
         <div id="waitingMsg" style="color:var(--color-text-dim);">waiting for host to start...</div>
         <div id="hostPanel" style="display:none;">
           <h2>host controls</h2>
+          <div id="sessionCodeBox" style="margin-bottom:12px;color:var(--color-text-dim);">
+            share code: <span id="sessionCodeText" style="color:var(--color-text);font-weight:bold;letter-spacing:2px;"></span>
+            <button id="copyCodeBtn" style="margin-left:8px;">> COPY</button>
+          </div>
           <label for="topicSelect">topic:</label>
           <select id="topicSelect" style="width:100%;margin:4px 0 12px;"></select>
           <div id="aiConfig"></div>
@@ -55,6 +68,8 @@ function render() {
       <div style="margin-top:12px;text-align:center;">
         <button id="resetBtn" style="color:var(--color-danger);border-color:var(--color-danger);width:100%;">> HARD RESET</button>
       </div>
+      <button id="rulesToggleBtn" style="width:100%;margin-top:8px;">> RULES</button>
+      <div id="rulesContent" class="rules-content" style="display:none;"></div>
     </div>
   `;
 
@@ -62,20 +77,58 @@ function render() {
   document.getElementById('nameInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') joinLobby();
   });
+  document.getElementById('codeInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') joinLobby();
+  });
+  // Prefill the code from an invite URL (?code=ABC123) if present.
+  const urlCode = new URLSearchParams(window.location.search).get('code');
+  if (urlCode) document.getElementById('codeInput').value = urlCode.toUpperCase();
+  applyRealmToJoinPanel();
   document.getElementById('resetBtn').addEventListener('click', () => {
     if (confirm('Reset all sessions and kick all players?')) {
       socket.emit('lobby:reset');
     }
   });
+
+  const rulesToggle = document.getElementById('rulesToggleBtn');
+  const rulesContent = document.getElementById('rulesContent');
+  rulesToggle.addEventListener('click', async () => {
+    if (rulesContent.style.display === 'block') {
+      rulesContent.style.display = 'none';
+      rulesToggle.textContent = '> RULES';
+      return;
+    }
+    if (!rulesCache) {
+      try {
+        const res = await fetch('/api/rules');
+        rulesCache = await res.text();
+      } catch {
+        rulesCache = 'Failed to load rules.';
+      }
+    }
+    rulesContent.textContent = rulesCache;
+    rulesContent.style.display = 'block';
+    rulesToggle.textContent = '> HIDE RULES';
+  });
+}
+
+// Show or hide the session-code field based on the client's realm. Safe to call
+// before render() (no-op if the field isn't in the DOM yet) and again after the
+// client:hello event arrives, so it works regardless of event/render ordering.
+function applyRealmToJoinPanel() {
+  const codeField = document.getElementById('codeField');
+  if (codeField) codeField.style.display = codeRequired ? 'block' : 'none';
 }
 
 function joinLobby() {
   const name = document.getElementById('nameInput').value.trim();
   if (!name) return;
-  socket.emit('lobby:setName', { name });
+  const code = document.getElementById('codeInput').value.trim().toUpperCase()
+    || new URLSearchParams(window.location.search).get('code') || undefined;
+  socket.emit('lobby:setName', { name, code });
 }
 
-function showLobby(state) {
+async function showLobby(state) {
   clearScrambles();
   const joinPanel = document.getElementById('joinPanel');
   const lobbyContent = document.getElementById('lobbyContent');
@@ -97,7 +150,7 @@ function showLobby(state) {
   if (state.isHost) {
     waitingMsg.style.display = 'none';
     hostPanel.style.display = 'block';
-    setupHostPanel(state);
+    await setupHostPanel(state);
   } else {
     waitingMsg.style.display = 'block';
     hostPanel.style.display = 'none';
@@ -106,7 +159,23 @@ function showLobby(state) {
   renderPlayerList(state.players);
 }
 
-function setupHostPanel(state) {
+async function setupHostPanel(state) {
+  // Show the host the join code and wire a clipboard copy. Use .onclick (not
+  // addEventListener) so repeated lobby:state calls don't stack listeners.
+  if (state.sessionCode) {
+    document.getElementById('sessionCodeText').textContent = state.sessionCode;
+    const copyBtn = document.getElementById('copyCodeBtn');
+    copyBtn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(state.sessionCode);
+        copyBtn.textContent = '> COPIED';
+        setTimeout(() => { copyBtn.textContent = '> COPY'; }, 1500);
+      } catch {
+        copyBtn.textContent = '> ' + state.sessionCode;
+      }
+    };
+  }
+
   // Replace start button to strip stale listeners (accumulated from repeated lobby:state calls)
   const oldBtn = document.getElementById('startBtn');
   if (oldBtn) {
@@ -121,29 +190,18 @@ function setupHostPanel(state) {
 
   const topicSelect = document.getElementById('topicSelect');
   topicSelect.innerHTML = '<option value="">-- random --</option>';
-  const topics = [
-    'Would you rather live in the city or the countryside?',
-    'What makes a piece of music unforgettable?',
-    'Is it ever okay to lie to someone you love?',
-    'What makes a great leader?',
-    'If you could master one skill instantly, what would it be?',
-    'What is the most important quality in a friend?',
-    'Should animals have the same rights as humans?',
-    'What does it mean to live a good life?',
-    'Is technology making us more or less connected?',
-    'What is the best book you have ever read and why?',
-    'If you could travel anywhere, where would you go?',
-    'What is the most important invention in human history?',
-    'Is it better to be talented or hardworking?',
-    'What is your earliest memory?',
-    'If you could have dinner with any historical figure, who would it be?',
-  ];
-  topics.forEach(t => {
-    const opt = document.createElement('option');
-    opt.value = t;
-    opt.textContent = t;
-    topicSelect.appendChild(opt);
-  });
+  try {
+    const res = await fetch('/api/topics');
+    const data = await res.json();
+    (data.topics || []).forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      topicSelect.appendChild(opt);
+    });
+  } catch {
+    console.error('Failed to load topics');
+  }
   if (prevTopic) topicSelect.value = prevTopic;
 
   const aiConfigDiv = document.getElementById('aiConfig');
@@ -154,20 +212,22 @@ function setupHostPanel(state) {
     slot.style.gap = '8px';
     slot.style.margin = '4px 0';
     const select = document.createElement('select');
-    if (state.models.length === 0) {
-      const opt = document.createElement('option');
-      opt.value = 'llama3';
-      opt.textContent = 'llama3 (default)';
-      select.appendChild(opt);
-    } else {
+    const modelsAvailable = state.models.length > 0;
+    if (modelsAvailable) {
       state.models.forEach(m => {
         const opt = document.createElement('option');
         opt.value = m;
         opt.textContent = m;
         select.appendChild(opt);
       });
+      select.value = model;
+    } else {
+      select.disabled = true;
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '-- no models available --';
+      select.appendChild(opt);
     }
-    select.value = model;
     select.style.flex = '1';
     const removeBtn = document.createElement('button');
     removeBtn.textContent = 'X';
@@ -182,8 +242,25 @@ function setupHostPanel(state) {
   const addAiBtn = document.createElement('button');
   addAiBtn.textContent = '+ ADD AI';
   addAiBtn.style.margin = '4px 0';
+  addAiBtn.disabled = !(state.models.length > 0);
   addAiBtn.addEventListener('click', () => addAiSlot(state.models));
   aiConfigDiv.appendChild(addAiBtn);
+  if (state.models.length === 0) {
+    const existingErr = document.getElementById('aiModelError');
+    if (!existingErr) {
+      const errDiv = document.createElement('div');
+      errDiv.id = 'aiModelError';
+      errDiv.style.color = 'var(--color-warning)';
+      errDiv.style.margin = '8px 0';
+      errDiv.style.padding = '8px';
+      errDiv.style.border = '1px solid var(--color-warning)';
+      errDiv.textContent = '! No Ollama models detected. Make sure Ollama is running.';
+      aiConfigDiv.appendChild(errDiv);
+    }
+  } else {
+    const existingErr = document.getElementById('aiModelError');
+    if (existingErr) existingErr.remove();
+  }
 
   const startBtn = document.getElementById('startBtn');
   updateStartBtn(state);
@@ -202,25 +279,19 @@ function setupHostPanel(state) {
 }
 
 function addAiSlot(models) {
+  if (models.length === 0) return;
   const container = document.getElementById('aiConfig');
   const slot = document.createElement('div');
   slot.style.display = 'flex';
   slot.style.gap = '8px';
   slot.style.margin = '4px 0';
   const select = document.createElement('select');
-  if (models.length === 0) {
+  models.forEach(m => {
     const opt = document.createElement('option');
-    opt.value = 'llama3';
-    opt.textContent = 'llama3 (default)';
+    opt.value = m;
+    opt.textContent = m;
     select.appendChild(opt);
-  } else {
-    models.forEach(m => {
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = m;
-      select.appendChild(opt);
-    });
-  }
+  });
   select.style.flex = '1';
   const removeBtn = document.createElement('button');
   removeBtn.textContent = 'X';
@@ -250,7 +321,8 @@ function updateStartBtn(state) {
   if (!startBtn) return;
   const humans = (state.players || []).filter(p => p.isHuman).length;
   const aiSlots = document.querySelectorAll('#aiConfig select').length;
-  startBtn.disabled = !(humans >= 2 && aiSlots >= 1);
+  const hasValidModel = aiSlots === 0 || Array.from(document.querySelectorAll('#aiConfig select')).some(sel => !sel.disabled);
+  startBtn.disabled = !(humans >= 2 && aiSlots >= 1 && hasValidModel);
 }
 
 function renderPlayerList(players) {
@@ -279,8 +351,17 @@ function renderPlayerList(players) {
   });
 }
 
+socket.on('client:hello', ({ realm } = {}) => {
+  // LAN players bypass the join code, so don't prompt them for one.
+  codeRequired = realm !== 'lan';
+  applyRealmToJoinPanel();
+});
+
 socket.on('lobby:state', (state) => {
-  showLobby(state);
+  // Token keyed by id so multiple tabs in one browser don't overwrite each
+  // other's secret (see multi-tab collision bug — myId is passed per-tab).
+  if (state.myToken && state.myId) localStorage.setItem('cogito_myToken_' + state.myId, state.myToken);
+  (async () => { await showLobby(state); })();
 });
 
 socket.on('host:assigned', () => {
@@ -290,8 +371,9 @@ socket.on('host:assigned', () => {
 
 socket.on('game:state', (state) => {
   clearScrambles();
-  sessionStorage.setItem('cogito_myId', state.myId || '');
-  window.location.href = 'game.html';
+  localStorage.setItem('cogito_myId', state.myId || '');
+  if (state.myToken && state.myId) localStorage.setItem('cogito_myToken_' + state.myId, state.myToken);
+  window.location.href = 'game.html?myId=' + encodeURIComponent(state.myId || '');
 });
 
 socket.on('error', ({ message }) => {
@@ -303,4 +385,40 @@ socket.on('error', ({ message }) => {
   app.appendChild(errDiv);
 });
 
-render();
+const urlParams = new URLSearchParams(window.location.search);
+const savedId = urlParams.get('myId') || localStorage.getItem('cogito_myId');
+const savedToken = savedId ? localStorage.getItem('cogito_myToken_' + savedId) : null;
+if (savedId) {
+  let rejoinResolved = false;
+
+  const onGameState = (state) => {
+    rejoinResolved = true;
+    clearScrambles();
+    localStorage.setItem('cogito_myId', state.myId || '');
+    if (state.myToken && state.myId) localStorage.setItem('cogito_myToken_' + state.myId, state.myToken);
+    window.location.href = 'game.html?myId=' + encodeURIComponent(state.myId || '');
+  };
+
+  const onError = () => {
+    rejoinResolved = true;
+    localStorage.removeItem('cogito_myId');
+    localStorage.removeItem('cogito_myToken_' + savedId);
+    render();
+  };
+
+  socket.once('game:state', onGameState);
+  socket.once('error', onError);
+  socket.emit('game:rejoin', { playerId: savedId, token: savedToken });
+
+  setTimeout(() => {
+    if (!rejoinResolved) {
+      socket.off('game:state', onGameState);
+      socket.off('error', onError);
+      localStorage.removeItem('cogito_myId');
+      localStorage.removeItem('cogito_myToken_' + savedId);
+      render();
+    }
+  }, 2000);
+} else {
+  render();
+}
