@@ -19,7 +19,9 @@ function generateSessionCode() {
 
 // Duration of the VOTING phase before rankings/votes are force-resolved.
 const VOTE_TIMEOUT_MS = 40000;
-const SUBMIT_PHASE_MS = 45000;
+const SUBMIT_PHASE_MS = 120000;
+// Pause after REVEALING before voting starts — gives humans time to read chats.
+const VOTING_SOON_DELAY_MS = 45000;
 
 // Max simultaneous in-flight requests to Ollama. Bounds load when many AIs
 // are configured; semantics (results/timeouts per task) are unchanged —
@@ -312,9 +314,12 @@ export class GameSession {
 
   async generateAIMessage(ai) {
     // Capture the round counter before the async Ollama call so we can detect
-    // stale replies that arrive after a round transition. CHAT_TIMEOUT_MS (60s)
-    // > SUBMIT_PHASE_MS (45s), so a round-N chat can return during round-N+1
-    // SUBMITTING and inject a stale message without this guard.
+    // stale replies that arrive after a round transition. The phase ends on a
+    // fixed timer (SUBMIT_PHASE_MS) whether or not every AI has replied, and the
+    // pool caps concurrency at MAX_CONCURRENT_OLLAMA_CALLS — so a chat queued
+    // behind others can start late and return after the round moved on (during
+    // REVEALING or round-N+1 SUBMITTING). Without this guard that reply would be
+    // injected into the wrong round's transcript and messageHistory.
     const round = this.round;
     const turnPrompt = buildTurnPrompt(this.lastElimination, this.buildDiscussionHint(ai), this.round === 0);
     const messages = [...ai.messageHistory, { role: 'user', content: turnPrompt }];
@@ -402,10 +407,10 @@ export class GameSession {
 
     if (this.round >= 2) {
       this.state = STATES.VOTING_SOON;
-      console.log(`[GAME] Round ${this.round} — voting starts in 5s`);
-      this.emitToAll('game:votingSoon', { delay: 5 });
+      console.log(`[GAME] Round ${this.round} — voting starts in ${VOTING_SOON_DELAY_MS / 1000}s`);
+      this.emitToAll('game:votingSoon', { delay: VOTING_SOON_DELAY_MS / 1000 });
       this.emitGameState();
-      this.voteSoonTimer = setTimeout(() => this.startVoting(), 5000);
+      this.voteSoonTimer = setTimeout(() => this.startVoting(), VOTING_SOON_DELAY_MS);
     } else {
       this.startSubmitPhase();
     }

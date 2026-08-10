@@ -8,7 +8,7 @@ let myId = urlParams.get('myId') || localStorage.getItem('cogito_myId') || null;
 // secret (myId arrives per-tab via the URL param; see multi-tab collision bug).
 let myToken = myId ? localStorage.getItem('cogito_myToken_' + myId) : null;
 let gameState = null;
-const SUBMIT_PHASE_SECONDS = 45;
+const SUBMIT_PHASE_SECONDS = 120;
 const VOTE_SECONDS = 40;
 
 let voteSoonCountdown = null;
