@@ -1,12 +1,9 @@
 # Cogito — Agent Guide
 
 ## Workflow
-- **Never leave workspace root.** Use `./tmp` for temp files (already gitignored).
-- **Branch from `develop`**, merge back to `develop`. Never touch `main`.
-- Git worktrees for parallel features: `git worktree add -b <name> ./worktrees/<name> develop`
-- `worktrees/` is in `.gitignore`.
-- Fetch/rebase, merge to `develop`, delete branch when done.
+- **Commit frequently and atomically** — one logical change per commit. Commit after each completed task.
 - **Conventional Commits** (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`).
+- **Push when a task is complete.**
 
 ## Stack
 - **ES Modules** (`"type": "module"`). App source `.js`, tests `.mjs`.
