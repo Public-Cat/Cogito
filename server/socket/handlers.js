@@ -13,7 +13,7 @@ const MAX_HUMAN_PLAYERS = 12;
 const MAX_TOPIC_LENGTH = 120;
 
 function sanitize(str) {
-  return str.replace(/[<>&"']/g, '');
+  return str.replace(/[<>]/g, '');
 }
 
 // Fixed-window rate limiter. Pre-join actions key by client IP; in-game actions
@@ -140,13 +140,14 @@ export function registerHandlers(io, socket) {
 
       session.assignHost();
       const models = getCachedModels();
-      socket.emit('lobby:state', lobbyStateFor(session, player, models));
-
-      const host = session.getHost();
-      if (host && host.socketId !== socket.id) {
-        io.to(host.socketId).emit('lobby:state', lobbyStateFor(session, host, models));
-        io.to(host.socketId).emit('host:assigned');
+      // Broadcast to all lobby players so everyone sees the updated player list.
+      for (const p of session.players) {
+        if (p.socketId) {
+          io.to(p.socketId).emit('lobby:state', lobbyStateFor(session, p, models));
+        }
       }
+      const host = session.getHost();
+      if (host) io.to(host.socketId).emit('host:assigned');
     } catch (err) {
       console.error('lobby:setName error:', err);
       socket.emit('error', { message: 'Failed to set name.' });

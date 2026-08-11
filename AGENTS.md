@@ -59,7 +59,7 @@ Minimum **2 humans + 1 AI** to start. Voting starts round ≥ 2, then every roun
 | `client/js/sfx.js` | Web Audio API sound effects |
 
 ## Key conventions
-- **Validation**: Names `/^[a-zA-Z0-9 ]{1,20}$/`, messages ≤500 chars, sanitized (`<>&"'` stripped). All handlers wrapped in try/catch.
+- **Validation**: Names `/^[a-zA-Z0-9 ]{1,20}$/`, messages ≤500 chars, sanitized (`<>` stripped — only HTML-injection vectors; client uses `textContent` so quotes/ampersand are safe). All handlers wrapped in try/catch.
 - **Game state** lives only in `GameSession.js` — never in socket handlers.
 - **`emitToAll` / `emitToSocket`** must be set by `lobby:start` handler *before* `startGame()`. Crashes if unset.
 - **AI disconnect asymmetry**: `getActiveAIs()` filters only by `isEliminated` — disconnected AIs still generate and vote. `getActivePlayers()` checks `isDisconnected`, so only humans lose active status on disconnect.
@@ -100,6 +100,14 @@ Built for **Cloudflare Tunnel → Caddy → app**. See `deploy/README.md`.
 - Env: `HOST=0.0.0.0`, `ALLOWED_ORIGINS`, `OLLAMA_BASE_URL`.
 - `.dockerignore` excludes `*.md` but preserves `!RULES.md`.
 
+## Operational gotchas
+- **Stale processes**: `npm start &` background processes get killed when the shell exits. Use `nohup node server/index.js > /tmp/cogito.log 2>&1 &` to persist. Check with `ss -tlnp | grep 3000` before starting — old processes can linger and cause port conflicts.
+- **HOST binding**: Server defaults to `127.0.0.1`. Tests connecting from other hosts need `HOST=0.0.0.0`. Docker already sets this; bare `npm start` does not.
+- **Test target**: Most tests connect to `http://192.168.1.32:3000` by default. Override with `COGITO_URL=http://127.0.0.1:3000` for local runs. Exception: `security.mjs` and `join.mjs` hardcode the production URL — they only work against the dev server at that address.
+- **Ollama dependency**: Any test that starts a game (e2e, full-game, disconnect, rejoin) needs Ollama reachable at `OLLAMA_BASE_URL` with `qwen2.5:7b` pulled. Without it, tests hang waiting for AI submission. `win-condition.mjs` is the only test that runs without a server or Ollama.
+- **Docker compose**: Fails if `deploy/Caddy/data/caddy/certificates` doesn't exist. `mkdir -p` it first.
+- **Between-test cleanup**: Server state is dirty after each test run. Either restart the server or include a `lobby:reset` step in the next test.
+
 ## Historical bugs (don't reintroduce)
 | Bug | Fix |
 |---|---|
@@ -110,3 +118,7 @@ Built for **Cloudflare Tunnel → Caddy → app**. See `deploy/README.md`.
 | Shared localStorage `myId` → multi-tab collision | Key is `cogito_myId`, emitted per-player via `game:state.myId` |
 | Borda single-player ranking gave 0 points (N-1 where N=1) | Edge case: ranking only 1 player → give 1 point |
 | Borda ties stalled games with even AI splits | Add cumulative Borda history as 2nd-level tiebreaker |
+| Eliminated humans still saw active chat input | `updateUI()` checks `isEliminated` first, disables input + shows "terminated" placeholder |
+| Quotes/symbols stripped from chat messages | `sanitize()` now strips only `<>` (client uses `textContent`, no injection risk) |
+| Player list order predictable (humans always first) | `getGameState()` and `getLobbyState()` shuffle player array before returning |
+| Non-host lobby players didn't see new joiners (stale count) | `lobby:setName` broadcasts to all players in session, not just host + joiner |

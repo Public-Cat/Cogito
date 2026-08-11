@@ -158,7 +158,15 @@ function updateUI(state) {
   const input = document.getElementById('msgInput');
   const sendBtn = document.getElementById('sendBtn');
 
-  if (state.phase === 'SUBMITTING') {
+  const me = state.players.find(p => p.id === myId);
+  const eliminated = me && me.isEliminated;
+
+  if (eliminated) {
+    input.disabled = true;
+    sendBtn.disabled = true;
+    input.placeholder = 'you have been terminated';
+    document.getElementById('turnIndicator').textContent = '> you have been terminated';
+  } else if (state.phase === 'SUBMITTING') {
     const hasSubmitted = state.submittedBy && state.submittedBy.includes(myId);
     input.disabled = hasSubmitted;
     sendBtn.disabled = hasSubmitted;

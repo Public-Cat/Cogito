@@ -157,8 +157,9 @@ export class GameSession {
   }
 
   getLobbyState() {
+    const shuffled = [...this.players].sort(() => Math.random() - 0.5);
     return {
-      players: this.players.map(p => ({
+      players: shuffled.map(p => ({
         id: p.id,
         name: p.name,
         isHuman: p.isHuman,
@@ -169,8 +170,9 @@ export class GameSession {
   }
 
   getGameState() {
+    const shuffled = [...this.players].sort(() => Math.random() - 0.5);
     return {
-      players: this.players.map(p => ({
+      players: shuffled.map(p => ({
         id: p.id,
         name: p.name,
         isHuman: p.isHuman,
