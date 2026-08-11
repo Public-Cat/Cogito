@@ -1,9 +1,18 @@
 # Cogito — Agent Guide
 
+## Git (MANDATORY — never skip)
+After EVERY completed task, run these exact commands:
+```bash
+git add -A
+git commit -m "type: description"  # Conventional Commits: feat:, fix:, chore:, docs:, refactor:, test:
+```
+- One logical change per commit. Commit BEFORE responding to the user that you're done.
+- Push with `git push` when the task is complete.
+- If there's nothing to commit (working tree clean), that's fine — just move on.
+
 ## Workflow
-- **Commit frequently and atomically** — one logical change per commit. Commit after each completed task.
-- **Conventional Commits** (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`).
-- **Push when a task is complete.**
+- Read AGENTS.md on every session start.
+- Commit after each completed task (see Git section above).
 
 ## Stack
 - **ES Modules** (`"type": "module"`). App source `.js`, tests `.mjs`.
