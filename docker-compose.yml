@@ -26,6 +26,7 @@ services:
       # (copy .env.example) — must match the vhost blocks in deploy/Caddyfile
       # (see deploy/README.md). Comma-separated, no spaces.
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
     restart: unless-stopped
 
 networks:
