@@ -44,7 +44,7 @@ function render() {
         <input type="text" id="nameInput" maxlength="20" placeholder="your name" style="width:100%;margin:8px 0;">
         <div id="codeField">
           <label for="codeInput">session code:</label><br>
-          <input type="text" id="codeInput" maxlength="6" placeholder="code from your host (friends only)" style="width:100%;margin:8px 0;text-transform:uppercase;">
+          <input type="text" id="codeInput" maxlength="12" placeholder="code from your host (friends only)" style="width:100%;margin:8px 0;text-transform:uppercase;">
         </div>
         <button id="joinBtn" style="width:100%;">> JOIN</button>
       </div>
