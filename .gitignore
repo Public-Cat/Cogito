@@ -6,3 +6,4 @@ tmp/
 worktrees/
 .claude/settings.local.json
 deploy/Caddy/
+.pi-subagents/
