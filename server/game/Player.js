@@ -12,5 +12,6 @@ export class Player {
     this.currentVote = null;
     this.realm = 'public'; // 'lan' if behind trusted reverse proxy
     this.rejoinToken = null;
+    this.hostSecretAuthed = false; // set when player joins with valid host secret
   }
 }

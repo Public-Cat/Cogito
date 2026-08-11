@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { getModels } from './ollama/OllamaClient.js';
 import { registerHandlers } from './socket/handlers.js';
 import { topics } from './game/topics.js';
+import hostSecretManager from './HostSecretManager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -57,6 +58,7 @@ io.on('connection', (socket) => {
   registerHandlers(io, socket);
 });
 
+hostSecretManager.init(process.env.DISCORD_WEBHOOK_URL);
 httpServer.listen(PORT, HOST, () => {
   console.log(`Cogito server listening on ${HOST}:${PORT}`);
 });

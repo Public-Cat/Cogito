@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import gameManager from '../game/GameManager.js';
 import { getCachedModels } from '../ollama/OllamaClient.js';
+import hostSecretManager from '../HostSecretManager.js';
 
 const NAME_REGEX = /^[a-zA-Z0-9 ]{1,20}$/;
 // Ollama model names: word chars plus the separators real tags/namespaces use
@@ -64,7 +65,7 @@ function safeEqual(a, b) {
 
 function requireLanHost(session, socket) {
   const player = session.getPlayerBySocket(socket.id);
-  if (!player || !player.isHost || socket.data.realm !== 'lan') {
+  if (!player || !player.isHost || (socket.data.realm !== 'lan' && !player.hostSecretAuthed)) {
     socket.emit('error', { message: 'Not authorized.' });
     return false;
   }
@@ -97,14 +98,18 @@ export function registerHandlers(io, socket) {
         return;
       }
 
-      // Public-realm join gate: must present the current session's code.
-      // LAN realm (trusted reverse proxy) bypasses this and is what creates
-      // the session — so a public player can never spin up a session, and
-      // there's nothing to join until the LAN host has joined.
+      // Public-realm join gate: check host secret first, then session code.
+      // LAN realm (trusted reverse proxy) bypasses code checks entirely.
+      // Host-secret matches create or join a session and grant host privileges.
+      let hostSecretAuthed = false;
       const existing = gameManager.getSession();
-      if (socket.data.realm === 'public' && (!existing || !safeEqual(code, existing.sessionCode))) {
-        socket.emit('error', { message: 'Invalid session code.' });
-        return;
+      if (socket.data.realm === 'public') {
+        if (code && hostSecretManager.check(code)) {
+          hostSecretAuthed = true;
+        } else if (!existing || !safeEqual(code, existing.sessionCode)) {
+          socket.emit('error', { message: 'Invalid session code.' });
+          return;
+        }
       }
 
       const session = gameManager.getOrCreateSession();
@@ -135,6 +140,7 @@ export function registerHandlers(io, socket) {
         player.name = sanitizedName;
         player.realm = socket.data.realm;
         player.rejoinToken = randomBytes(16).toString('hex');
+        player.hostSecretAuthed = hostSecretAuthed;
         console.log(`[HUMAN] Player "${sanitizedName}" joined lobby`);
       }
 

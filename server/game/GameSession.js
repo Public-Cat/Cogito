@@ -121,14 +121,13 @@ export class GameSession {
   }
 
   assignHost() {
-    // Only LAN-realm humans (trusted, behind the reverse proxy's header) may
-    // host — hosting grants privileged control (lobby:reset, lobby:start).
-    // Public-realm players never become host; if none qualify, no host is
-    // assigned (the game simply can't be started by a public player).
-    const lanHumans = this.players.filter(p => p.isHuman && p.realm === 'lan');
+    // LAN-realm or host-secret-authed humans may host.
+    const eligible = this.players.filter(p =>
+      p.isHuman && (p.realm === 'lan' || p.hostSecretAuthed)
+    );
     for (const p of this.players) p.isHost = false;
-    if (lanHumans.length > 0) {
-      lanHumans[0].isHost = true;
+    if (eligible.length > 0) {
+      eligible[0].isHost = true;
     }
   }
 
