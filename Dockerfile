@@ -1,7 +1,4 @@
 FROM node:20-alpine
-# Update the bundled npm to the latest release so the build no longer prints an
-# "npm update available" notice. Done before npm ci so the install runs on it.
-RUN npm install -g npm@latest
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
